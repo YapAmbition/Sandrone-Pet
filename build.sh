@@ -34,7 +34,7 @@ ditto "$ROOT_DIR/Assets/Proud" "$RESOURCES_DIR/Proud"
 codesign --force --deep --sign - "$APP_DIR"
 
 mkdir -p "$BUILD_DIR"
-ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$BUILD_DIR/哈气桑多涅-macOS.zip"
+ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$BUILD_DIR/Hissy-Sandrone-macOS.zip"
 
 echo "$APP_DIR"
-echo "$BUILD_DIR/哈气桑多涅-macOS.zip"
+echo "$BUILD_DIR/Hissy-Sandrone-macOS.zip"

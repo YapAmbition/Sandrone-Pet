@@ -27,7 +27,7 @@
 2. 在 [CHANGELOG.md](CHANGELOG.md) 中记录用户可见改动。
 3. 执行 `./build.sh` 并检查 Intel 与 Apple Silicon 通用二进制。
 4. 提交后创建带注释标签，例如 `git tag -a v1.8.0 -m "哈气桑多涅 v1.8.0"`。
-5. 将 `build/哈气桑多涅-macOS.zip` 上传到同版本的 GitHub Release。
+5. 将 `build/Hissy-Sandrone-macOS.zip` 上传到同版本的 GitHub Release。
 
 ## 素材和权利
 

@@ -30,12 +30,12 @@ jobs:
           codesign --verify --deep --strict "build/哈气桑多涅.app"
           file "build/哈气桑多涅.app/Contents/MacOS/HissySandrone"
           plutil -lint "build/哈气桑多涅.app/Contents/Info.plist"
-          unzip -tq "build/哈气桑多涅-macOS.zip"
+          unzip -tq "build/Hissy-Sandrone-macOS.zip"
 
       - name: Upload app artifact
         uses: actions/upload-artifact@v7
         with:
           name: hissy-sandrone-macos-${{ github.sha }}
-          path: build/哈气桑多涅-macOS.zip
+          path: build/Hissy-Sandrone-macOS.zip
           if-no-files-found: error
           retention-days: 14
