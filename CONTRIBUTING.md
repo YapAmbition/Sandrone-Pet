@@ -8,7 +8,7 @@
 
 ## 开发流程
 
-1. 从 `main` 创建功能或修复分支，例如 `feature/more-dialogues` 或 `fix/fullscreen-detection`。
+1. 从 `master` 创建功能或修复分支，例如 `feature/more-dialogues` 或 `fix/fullscreen-detection`。
 2. 保持每个提交只处理一件事，提交信息使用简短的英文动词开头。
 3. 执行 `./build.sh`。
 4. 确认 `build/哈气桑多涅.app` 能启动，并手动验证受影响的动作、菜单、尺寸和多屏行为。
@@ -26,8 +26,10 @@
 1. 更新 `Info.plist` 中的 `CFBundleShortVersionString` 和递增的 `CFBundleVersion`。
 2. 在 [CHANGELOG.md](CHANGELOG.md) 中记录用户可见改动。
 3. 执行 `./build.sh` 并检查 Intel 与 Apple Silicon 通用二进制。
-4. 提交后创建带注释标签，例如 `git tag -a v1.8.0 -m "哈气桑多涅 v1.8.0"`。
-5. 将 `build/Hissy-Sandrone-macOS.zip` 上传到同版本的 GitHub Release。
+4. 将改动提交并推送到 `master`。
+5. GitHub Actions 会读取版本号，自动创建 `v版本号` 标签、生成 Release 说明，并上传 `Hissy-Sandrone-macOS.zip`。
+
+已存在对应 Release 时，同版本的后续推送只会构建和校验，不会覆盖已发布的安装包。发布新版本前必须先更新 `CFBundleShortVersionString`。
 
 ## 素材和权利
 

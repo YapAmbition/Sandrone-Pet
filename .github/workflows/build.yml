@@ -1,8 +1,8 @@
-name: macOS Build
+name: macOS Build and Release
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -17,10 +17,24 @@ jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.release_meta.outputs.version }}
+      tag: ${{ steps.release_meta.outputs.tag }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Read release version
+        id: release_meta
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid CFBundleShortVersionString: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build universal app
         run: ./build.sh
@@ -35,7 +49,53 @@ jobs:
       - name: Upload app artifact
         uses: actions/upload-artifact@v7
         with:
-          name: hissy-sandrone-macos-${{ github.sha }}
+          name: hissy-sandrone-macos-${{ steps.release_meta.outputs.version }}
           path: build/Hissy-Sandrone-macOS.zip
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download validated package
+        uses: actions/download-artifact@v7
+        with:
+          name: hissy-sandrone-macos-${{ needs.build.outputs.version }}
+          path: release-assets
+
+      - name: Check release state
+        id: release_state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; build validation completed without republishing."
+            exit 0
+          fi
+          if gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG exists without a release. Bump CFBundleShortVersionString or remove the stale tag." >&2
+            exit 1
+          fi
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag and GitHub Release
+        if: steps.release_state.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            "release-assets/Hissy-Sandrone-macOS.zip" \
+            --target "$GITHUB_SHA" \
+            --title "哈气桑多涅 $TAG" \
+            --generate-notes

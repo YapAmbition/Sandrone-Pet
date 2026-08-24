@@ -69,3 +69,7 @@ chmod +x build.sh
 ```
 
 只需安装 Apple Command Line Tools，无需完整 Xcode。
+
+## 自动发布
+
+推送到 `master` 后，GitHub Actions 会构建并校验 macOS 安装包。当 `Info.plist` 使用尚未发布的新版本号时，工作流会自动创建 `v版本号` 标签和 GitHub Release，生成发布说明，并上传 `Hissy-Sandrone-macOS.zip`。已发布的版本不会被覆盖。
