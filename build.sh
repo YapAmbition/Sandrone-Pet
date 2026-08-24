@@ -10,6 +10,7 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 MODULE_CACHE_DIR="$BUILD_DIR/ModuleCache"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 
+rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$MODULE_CACHE_DIR"
 
 xcrun clang \
@@ -30,6 +31,7 @@ cp "$ROOT_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ROOT_DIR/Assets/spritesheet.png" "$RESOURCES_DIR/spritesheet.png"
 cp "$ROOT_DIR/Assets/AppIcon.png" "$RESOURCES_DIR/AppIcon.png"
 ditto "$ROOT_DIR/Assets/Proud" "$RESOURCES_DIR/Proud"
+ditto "$ROOT_DIR/Assets/Sleep" "$RESOURCES_DIR/Sleep"
 
 codesign --force --deep --sign - "$APP_DIR"
 

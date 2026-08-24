@@ -11,7 +11,8 @@ typedef NS_ENUM(NSInteger, PetMode) {
     PetModeWaiting,
     PetModeWorking,
     PetModeReview,
-    PetModeProud
+    PetModeProud,
+    PetModeSleeping
 };
 
 typedef NS_ENUM(NSInteger, PetVisibilityMode) {
@@ -31,6 +32,7 @@ static const CGFloat kCellHeight = 208.0;
 static const CGFloat kStandardPetScale = 0.75;
 static const CGFloat kMinimumPetScale = 0.5625;
 static const CGFloat kMaximumPetScale = 1.125;
+static const NSTimeInterval kAutomaticSleepDelay = 60.0;
 
 static NSInteger RowForMode(PetMode mode) { return mode == PetModeProud ? 6 : (NSInteger)mode; }
 
@@ -45,12 +47,16 @@ static NSInteger FrameCountForMode(PetMode mode) {
         case PetModeWaiting:
         case PetModeWorking:
         case PetModeReview:
-        case PetModeProud: return 6;
+        case PetModeProud:
+        case PetModeSleeping: return 6;
     }
 }
 
 static BOOL IsTransientMode(PetMode mode) {
-    return mode >= PetModeWaving;
+    return mode != PetModeIdle &&
+           mode != PetModeWalkRight &&
+           mode != PetModeWalkLeft &&
+           mode != PetModeSleeping;
 }
 
 static NSInteger RandomBetween(NSInteger lower, NSInteger upper) {
@@ -92,6 +98,12 @@ static NSAttributedString *HelpContent(void) {
     AppendHelpParagraph(text, @"•  多戳她几下：她可能会不耐烦\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  在她附近快速晃动鼠标：她可能会盯住并扑过去\n", [NSFont systemFontOfSize:14.0], 10.0, YES);
     AppendHelpParagraph(text, @"扑到鼠标后，她会露出得意脸；扑空则会生气哈气。\n", [NSFont systemFontOfSize:14.0], 18.0, NO);
+
+    AppendHelpParagraph(text, @"睡觉与唤醒\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
+    AppendHelpParagraph(text, @"一分钟没有和她互动后，她会在当前动作结束时睡着。普通的远距离鼠标移动不会打扰她。\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
+    AppendHelpParagraph(text, @"•  点击或拖动她：立即醒来\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
+    AppendHelpParagraph(text, @"•  鼠标重新靠近并短暂停留：慢慢醒来\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
+    AppendHelpParagraph(text, @"•  菜单中的“让她睡觉 / 叫醒她”：手动切换睡眠\n", [NSFont systemFontOfSize:14.0], 10.0, YES);
 
     AppendHelpParagraph(text, @"调整宠物\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
     AppendHelpParagraph(text, @"点击菜单栏的 🐾，或者右键桑多涅，可以：\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
@@ -156,12 +168,14 @@ static void ShowHelpWindow(void) {
 - (instancetype)initWithBundle:(NSBundle *)bundle;
 - (NSImage *)frameAtRow:(NSInteger)row column:(NSInteger)column;
 - (NSImage *)proudFrameAtColumn:(NSInteger)column;
+- (NSImage *)sleepFrameAtColumn:(NSInteger)column;
 @end
 
 @implementation SpriteAtlas {
     NSImage *_source;
     NSMutableDictionary<NSString *, NSImage *> *_cache;
     NSArray<NSImage *> *_proudFrames;
+    NSArray<NSImage *> *_sleepFrames;
 }
 
 - (instancetype)initWithBundle:(NSBundle *)bundle {
@@ -180,6 +194,15 @@ static void ShowHelpWindow(void) {
         [proudFrames addObject:frame];
     }
     _proudFrames = proudFrames.copy;
+    NSMutableArray<NSImage *> *sleepFrames = [NSMutableArray arrayWithCapacity:6];
+    for (NSInteger index = 0; index < 6; index++) {
+        NSString *name = [NSString stringWithFormat:@"sleep-%ld", (long)index];
+        NSURL *frameURL = [bundle URLForResource:name withExtension:@"png" subdirectory:@"Sleep"];
+        NSImage *frame = frameURL ? [[NSImage alloc] initWithContentsOfURL:frameURL] : nil;
+        if (!frame) return nil;
+        [sleepFrames addObject:frame];
+    }
+    _sleepFrames = sleepFrames.copy;
     return self;
 }
 
@@ -208,6 +231,10 @@ static void ShowHelpWindow(void) {
 - (NSImage *)proudFrameAtColumn:(NSInteger)column {
     if (column < 0 || column >= (NSInteger)_proudFrames.count) return nil;
     return _proudFrames[column];
+}
+- (NSImage *)sleepFrameAtColumn:(NSInteger)column {
+    if (column < 0 || column >= (NSInteger)_sleepFrames.count) return nil;
+    return _sleepFrames[column];
 }
 @end
 
@@ -276,6 +303,7 @@ static void ShowHelpWindow(void) {
 @property(nonatomic, readonly) BOOL cursorHuntEnabled;
 @property(nonatomic, readonly) PetVisibilityMode visibilityMode;
 @property(nonatomic, readonly) PetActivityLevel activityLevel;
+@property(nonatomic, readonly, getter=isSleeping) BOOL sleeping;
 - (instancetype)initWithAtlas:(SpriteAtlas *)atlas;
 - (void)setPaused:(BOOL)paused;
 - (void)setClickThrough:(BOOL)enabled;
@@ -288,6 +316,7 @@ static void ShowHelpWindow(void) {
 - (void)triggerWaiting;
 - (void)triggerWorking;
 - (void)triggerReview;
+- (void)toggleSleep;
 - (void)setCursorHuntEnabled:(BOOL)enabled;
 - (void)setVisibilityMode:(PetVisibilityMode)mode;
 - (void)setActivityLevel:(PetActivityLevel)level;
@@ -340,6 +369,11 @@ static void ShowHelpWindow(void) {
     NSMenuItem *hiss = [[NSMenuItem alloc] initWithTitle:@"哈气！" action:@selector(contextHiss:) keyEquivalent:@""];
     hiss.target = self;
     [menu addItem:hiss];
+    NSMenuItem *sleep = [[NSMenuItem alloc] initWithTitle:self.controller.isSleeping ? @"叫醒她" : @"让她睡觉"
+                                                  action:@selector(contextToggleSleep:)
+                                           keyEquivalent:@""];
+    sleep.target = self;
+    [menu addItem:sleep];
     NSMenuItem *reset = [[NSMenuItem alloc] initWithTitle:@"回到屏幕右下角" action:@selector(contextReset:) keyEquivalent:@""];
     reset.target = self;
     [menu addItem:reset];
@@ -392,6 +426,7 @@ static void ShowHelpWindow(void) {
 }
 - (void)contextProud:(id)sender { [self.controller triggerProud]; }
 - (void)contextHiss:(id)sender { [self.controller triggerHiss]; }
+- (void)contextToggleSleep:(id)sender { [self.controller toggleSleep]; }
 - (void)contextReset:(id)sender { [self.controller resetPosition]; }
 - (void)contextChangeVisibility:(NSMenuItem *)sender {
     [self.controller setVisibilityMode:(PetVisibilityMode)[sender.representedObject integerValue]];
@@ -440,6 +475,11 @@ static void ShowHelpWindow(void) {
     BOOL _petIsVisible;
     BOOL _lastFullscreenDetected;
     NSInteger _fullscreenCheckClock;
+    NSTimeInterval _lastInteractionTime;
+    BOOL _sleepRequested;
+    BOOL _sleeping;
+    BOOL _wakeProximityArmed;
+    NSInteger _wakeHoverTicks;
 }
 
 - (instancetype)initWithAtlas:(SpriteAtlas *)atlas {
@@ -498,6 +538,7 @@ static void ShowHelpWindow(void) {
 
     [self positionAtBottomRight];
     [self setMode:PetModeIdle ticks:80 loops:0];
+    _lastInteractionTime = NSDate.timeIntervalSinceReferenceDate;
     _petIsVisible = NO;
     [self refreshVisibility];
     _timer = [NSTimer timerWithTimeInterval:1.0 / 24.0
@@ -541,6 +582,7 @@ static void ShowHelpWindow(void) {
 }
 
 - (void)resetPosition {
+    [self noteInteraction];
     [self positionAtBottomRight];
     [self refreshVisibility];
 }
@@ -566,15 +608,21 @@ static void ShowHelpWindow(void) {
 }
 
 - (void)triggerWave {
+    [self noteInteraction];
     [self cancelHunt];
     [self setMode:PetModeWaving ticks:90 loops:2];
 }
 - (void)triggerProud {
+    [self noteInteraction];
+    [self startProud];
+}
+- (void)startProud {
     [self cancelHunt];
     [self setMode:PetModeProud ticks:90 loops:2];
     [self showSpeechText:@"多涅多涅~" duration:1.8];
 }
 - (void)triggerJump {
+    [self noteInteraction];
     [self cancelHunt];
     if (_mode == PetModeJumping) {
         NSPoint origin = _panel.frame.origin;
@@ -591,6 +639,7 @@ static void ShowHelpWindow(void) {
     [self setMode:PetModeJumping ticks:90 loops:0];
 }
 - (void)triggerHiss {
+    [self noteInteraction];
     [self startHissWithLoops:3];
 }
 - (void)startHissWithLoops:(NSInteger)loops {
@@ -605,9 +654,91 @@ static void ShowHelpWindow(void) {
     [self setMode:PetModeHissing ticks:90 loops:loops];
     [self showSpeechText:@"哈?~~" duration:MAX(2.0, (NSTimeInterval)loops)];
 }
-- (void)triggerWaiting { [self setMode:PetModeWaiting ticks:90 loops:2]; }
-- (void)triggerWorking { [self setMode:PetModeWorking ticks:90 loops:2]; }
-- (void)triggerReview { [self setMode:PetModeReview ticks:90 loops:2]; }
+- (void)triggerWaiting { [self noteInteraction]; [self setMode:PetModeWaiting ticks:90 loops:2]; }
+- (void)triggerWorking { [self noteInteraction]; [self setMode:PetModeWorking ticks:90 loops:2]; }
+- (void)triggerReview { [self noteInteraction]; [self setMode:PetModeReview ticks:90 loops:2]; }
+
+- (BOOL)isSleeping { return _sleeping; }
+
+- (void)noteInteraction {
+    _lastInteractionTime = NSDate.timeIntervalSinceReferenceDate;
+    _sleepRequested = NO;
+    if (_sleeping) [self wakeFromSleep];
+}
+
+- (void)toggleSleep {
+    if (_sleeping) {
+        [self noteInteraction];
+        return;
+    }
+    _lastInteractionTime = NSDate.timeIntervalSinceReferenceDate;
+    _sleepRequested = YES;
+    if (_mode == PetModeIdle || _mode == PetModeWalkLeft || _mode == PetModeWalkRight) {
+        [self startSleeping];
+    }
+}
+
+- (CGFloat)sleepWakeRadius {
+    return _panel.frame.size.width * 1.18;
+}
+
+- (void)startSleeping {
+    [self cancelHunt];
+    _sleepRequested = NO;
+    _sleeping = YES;
+    _wakeHoverTicks = 0;
+    NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
+    NSPoint pointer = NSEvent.mouseLocation;
+    _wakeProximityArmed = hypot(pointer.x - center.x, pointer.y - center.y) > [self sleepWakeRadius];
+    [self setMode:PetModeSleeping ticks:NSIntegerMax loops:0];
+    [self showSpeechText:@"Zzz…" duration:2.2];
+}
+
+- (void)wakeFromSleep {
+    if (!_sleeping) return;
+    _sleeping = NO;
+    _sleepRequested = NO;
+    _wakeHoverTicks = 0;
+    [_speechTimer invalidate];
+    _speechTimer = nil;
+    [_speechPanel orderOut:nil];
+    [self setMode:PetModeIdle ticks:48 loops:0];
+}
+
+- (void)updateAutomaticSleep {
+    if (_sleeping || _sleepRequested) return;
+    NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
+    if (now - _lastInteractionTime < kAutomaticSleepDelay) return;
+    _sleepRequested = YES;
+    if (_mode == PetModeIdle) [self startSleeping];
+}
+
+- (void)tickSleeping {
+    _frameClock += 1;
+    if (_frameClock >= 10) {
+        _frameClock = 0;
+        _frameIndex = (_frameIndex + 1) % FrameCountForMode(PetModeSleeping);
+    }
+    _view.currentFrame = [_atlas sleepFrameAtColumn:_frameIndex];
+
+    NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
+    NSPoint pointer = NSEvent.mouseLocation;
+    CGFloat distance = hypot(pointer.x - center.x, pointer.y - center.y);
+    CGFloat radius = [self sleepWakeRadius];
+    if (!_wakeProximityArmed) {
+        if (distance > radius) _wakeProximityArmed = YES;
+        return;
+    }
+    if (distance <= radius) {
+        _wakeHoverTicks += 1;
+        if (_wakeHoverTicks >= 20) {
+            _lastInteractionTime = NSDate.timeIntervalSinceReferenceDate;
+            [self wakeFromSleep];
+        }
+    } else {
+        _wakeHoverTicks = 0;
+    }
+}
 
 - (void)setCursorHuntEnabled:(BOOL)enabled {
     _cursorHuntEnabled = enabled;
@@ -627,6 +758,7 @@ static void ShowHelpWindow(void) {
 }
 
 - (void)petMouseDownAt:(NSPoint)location {
+    [self noteInteraction];
     if (_huntAnticipationTicks > 0 || _pounceActive) {
         [self cancelHunt];
         [self setMode:PetModeIdle ticks:80 loops:0];
@@ -636,6 +768,7 @@ static void ShowHelpWindow(void) {
                               location.y - _panel.frame.origin.y);
 }
 - (void)petMouseDraggedTo:(NSPoint)location {
+    [self noteInteraction];
     _dragging = YES;
     [_panel setFrameOrigin:NSMakePoint(location.x - _dragOffset.x,
                                        location.y - _dragOffset.y)];
@@ -668,6 +801,11 @@ static void ShowHelpWindow(void) {
     if (!_petIsVisible) return;
     if (_dragging) return;
     if (_huntCooldownTicks > 0) _huntCooldownTicks -= 1;
+    [self updateAutomaticSleep];
+    if (_sleeping) {
+        [self tickSleeping];
+        return;
+    }
     [self updateMouseHunt];
     if (_huntAnticipationTicks > 0) {
         [self tickHuntAnticipation];
@@ -810,7 +948,10 @@ static void ShowHelpWindow(void) {
     }
 
     CGFloat threshold = 10.5;
-    if (_lureScore >= threshold) [self beginHuntAt:pointer];
+    if (_lureScore >= threshold) {
+        [self noteInteraction];
+        [self beginHuntAt:pointer];
+    }
 }
 
 - (void)beginHuntAt:(NSPoint)pointer {
@@ -890,7 +1031,7 @@ static void ShowHelpWindow(void) {
             CGFloat verticalMiss = fabs(pointer.y - NSMidY(_panel.frame));
             BOOL caught = horizontalMiss < _panel.frame.size.width * 0.42 &&
                           verticalMiss < _panel.frame.size.height * 1.35;
-            if (caught) [self triggerProud];
+            if (caught) [self startProud];
             else [self startHissWithLoops:2];
         } else {
             [self chooseNextRoamPhase];
@@ -917,6 +1058,10 @@ static void ShowHelpWindow(void) {
 }
 
 - (void)chooseNextRoamPhase {
+    if (_sleepRequested) {
+        [self startSleeping];
+        return;
+    }
     if (_paused) {
         [self setMode:PetModeIdle ticks:NSIntegerMax loops:0];
         return;
@@ -956,6 +1101,7 @@ static void ShowHelpWindow(void) {
     _phaseTicks = ticks;
     _transientLoopsRemaining = loops;
     if (newMode == PetModeProud) _view.currentFrame = [_atlas proudFrameAtColumn:0];
+    else if (newMode == PetModeSleeping) _view.currentFrame = [_atlas sleepFrameAtColumn:0];
     else [self showRow:RowForMode(newMode) column:0];
 }
 
@@ -1045,6 +1191,7 @@ static void ShowHelpWindow(void) {
     NSMenuItem *_pauseItem;
     NSMenuItem *_clickThroughItem;
     NSMenuItem *_cursorHuntItem;
+    NSMenuItem *_sleepItem;
     NSMenu *_visibilityMenu;
     NSMenu *_activityMenu;
     NSMenuItem *_loginItem;
@@ -1077,6 +1224,8 @@ static void ShowHelpWindow(void) {
     [menu addItem:[self item:@"得意一下" action:@selector(proud:) key:@""]];
     [menu addItem:[self item:@"跳一下" action:@selector(jump:) key:@""]];
     [menu addItem:[self item:@"哈气！" action:@selector(hiss:) key:@""]];
+    _sleepItem = [self item:@"让她睡觉" action:@selector(toggleSleep:) key:@""];
+    [menu addItem:_sleepItem];
     [menu addItem:NSMenuItem.separatorItem];
     _cursorHuntItem = [self item:@"自动扑向鼠标" action:@selector(toggleCursorHunt:) key:@""];
     [menu addItem:_cursorHuntItem];
@@ -1146,6 +1295,7 @@ static void ShowHelpWindow(void) {
     _pauseItem.title = _controller.paused ? @"继续移动" : @"暂停移动";
     _clickThroughItem.state = _controller.clickThrough ? NSControlStateValueOn : NSControlStateValueOff;
     _cursorHuntItem.state = _controller.cursorHuntEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+    _sleepItem.title = _controller.isSleeping ? @"叫醒她" : @"让她睡觉";
     for (NSMenuItem *item in _visibilityMenu.itemArray) {
         item.state = [item.representedObject integerValue] == _controller.visibilityMode
             ? NSControlStateValueOn : NSControlStateValueOff;
@@ -1163,6 +1313,7 @@ static void ShowHelpWindow(void) {
 - (void)proud:(id)sender { [_controller triggerProud]; }
 - (void)jump:(id)sender { [_controller triggerJump]; }
 - (void)hiss:(id)sender { [_controller triggerHiss]; }
+- (void)toggleSleep:(id)sender { [_controller toggleSleep]; }
 - (void)toggleCursorHunt:(id)sender { [_controller setCursorHuntEnabled:!_controller.cursorHuntEnabled]; }
 - (void)resetPosition:(id)sender { [_controller resetPosition]; }
 - (void)togglePause:(id)sender { [_controller setPaused:!_controller.paused]; }
