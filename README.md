@@ -9,7 +9,7 @@
 
 ## 下载与安装
 
-1. 前往仓库的 [Releases](https://github.com/YapAmbition/Sandrone--Pet/releases/latest) 页面。
+1. 前往仓库的 [Releases](https://github.com/YapAmbition/Sandrone-Pet/releases/latest) 页面。
 2. 下载 `Hissy-Sandrone-macOS.zip`，不要下载 GitHub 自动生成的 `Source code`。
 3. 解压后，可以将 `哈气桑多涅.app` 拖入“应用程序”文件夹，然后双击打开。
 
