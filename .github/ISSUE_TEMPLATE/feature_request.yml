@@ -1,0 +1,38 @@
+name: 功能建议
+description: 建议新的动作、表情、台词或桌面交互
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 Issue，没有找到相同建议。
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么问题？
+      description: 先说明使用场景，不要只给出实现方法。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的交互或表现
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 其他可选方案
+    validations:
+      required: false
+  - type: textarea
+    id: references
+    attributes:
+      label: 参考图或补充信息
+      description: 如果包含第三方素材，请说明来源和权利状态。
+    validations:
+      required: false

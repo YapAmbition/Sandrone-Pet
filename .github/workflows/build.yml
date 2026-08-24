@@ -1,0 +1,41 @@
+name: macOS Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build universal app
+        run: ./build.sh
+
+      - name: Validate bundle
+        run: |
+          codesign --verify --deep --strict "build/哈气桑多涅.app"
+          file "build/哈气桑多涅.app/Contents/MacOS/HissySandrone"
+          plutil -lint "build/哈气桑多涅.app/Contents/Info.plist"
+          unzip -tq "build/哈气桑多涅-macOS.zip"
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: hissy-sandrone-macos-${{ github.sha }}
+          path: build/哈气桑多涅-macOS.zip
+          if-no-files-found: error
+          retention-days: 14

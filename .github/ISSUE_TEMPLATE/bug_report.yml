@@ -1,0 +1,67 @@
+name: Bug 报告
+description: 报告可复现的崩溃、动画或交互问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 Issue，没有找到相同问题。
+          required: true
+        - label: 我使用的是最新发布版本。
+          required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: 宠物版本
+      placeholder: 例如 1.8.0
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS 版本
+      placeholder: 例如 15.6
+    validations:
+      required: true
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Mac 类型
+      options:
+        - Apple Silicon
+        - Intel
+        - 不确定
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 看到……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 截图、录屏或其他信息
+      description: 请不要上传包含密码、API Key 或公司机密的画面。
+    validations:
+      required: false

@@ -1,0 +1,4 @@
+build/
+AppIcon.iconset/
+.DS_Store
+*.xcuserstate
