@@ -63,6 +63,355 @@ static NSInteger RandomBetween(NSInteger lower, NSInteger upper) {
     return lower + (NSInteger)arc4random_uniform((uint32_t)(upper - lower + 1));
 }
 
+@interface PetStats : NSObject
+@property(nonatomic, readonly) NSTimeInterval todayCompanionSeconds;
+@property(nonatomic, readonly) NSTimeInterval totalCompanionSeconds;
+@property(nonatomic, readonly) NSInteger todayInteractions;
+@property(nonatomic, readonly) NSInteger totalInteractions;
+@property(nonatomic, readonly) NSInteger todayCaught;
+@property(nonatomic, readonly) NSInteger totalCaught;
+@property(nonatomic, readonly) NSInteger todayMissed;
+@property(nonatomic, readonly) NSInteger totalMissed;
+@property(nonatomic, readonly) NSInteger todayHisses;
+@property(nonatomic, readonly) NSInteger totalHisses;
+@property(nonatomic, readonly) NSInteger todaySleeps;
+@property(nonatomic, readonly) NSInteger totalSleeps;
+- (void)addVisibleSeconds:(NSTimeInterval)seconds;
+- (void)recordInteraction;
+- (void)recordCaught;
+- (void)recordMissed;
+- (void)recordHiss;
+- (void)recordSleep;
+- (void)save;
+- (void)resetAll;
+@end
+
+static NSString *CurrentStatsDayKey(void) {
+    NSDateComponents *components = [NSCalendar.currentCalendar components:NSCalendarUnitYear |
+                                                                        NSCalendarUnitMonth |
+                                                                        NSCalendarUnitDay
+                                                               fromDate:NSDate.date];
+    return [NSString stringWithFormat:@"%04ld-%02ld-%02ld",
+            (long)components.year, (long)components.month, (long)components.day];
+}
+
+@implementation PetStats {
+    NSString *_dayKey;
+    NSTimeInterval _todayCompanionSeconds;
+    NSTimeInterval _totalCompanionSeconds;
+    NSInteger _todayInteractions;
+    NSInteger _totalInteractions;
+    NSInteger _todayCaught;
+    NSInteger _totalCaught;
+    NSInteger _todayMissed;
+    NSInteger _totalMissed;
+    NSInteger _todayHisses;
+    NSInteger _totalHisses;
+    NSInteger _todaySleeps;
+    NSInteger _totalSleeps;
+    NSTimeInterval _secondsSinceSave;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (!self) return nil;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    _dayKey = [defaults stringForKey:@"statsDayKey"] ?: CurrentStatsDayKey();
+    _todayCompanionSeconds = [defaults doubleForKey:@"statsTodayCompanionSeconds"];
+    _totalCompanionSeconds = [defaults doubleForKey:@"statsTotalCompanionSeconds"];
+    _todayInteractions = [defaults integerForKey:@"statsTodayInteractions"];
+    _totalInteractions = [defaults integerForKey:@"statsTotalInteractions"];
+    _todayCaught = [defaults integerForKey:@"statsTodayCaught"];
+    _totalCaught = [defaults integerForKey:@"statsTotalCaught"];
+    _todayMissed = [defaults integerForKey:@"statsTodayMissed"];
+    _totalMissed = [defaults integerForKey:@"statsTotalMissed"];
+    _todayHisses = [defaults integerForKey:@"statsTodayHisses"];
+    _totalHisses = [defaults integerForKey:@"statsTotalHisses"];
+    _todaySleeps = [defaults integerForKey:@"statsTodaySleeps"];
+    _totalSleeps = [defaults integerForKey:@"statsTotalSleeps"];
+    [self ensureCurrentDay];
+    return self;
+}
+
+- (void)ensureCurrentDay {
+    NSString *currentDay = CurrentStatsDayKey();
+    if ([_dayKey isEqualToString:currentDay]) return;
+    _dayKey = currentDay;
+    _todayCompanionSeconds = 0;
+    _todayInteractions = 0;
+    _todayCaught = 0;
+    _todayMissed = 0;
+    _todayHisses = 0;
+    _todaySleeps = 0;
+    [self save];
+}
+
+- (NSTimeInterval)todayCompanionSeconds { [self ensureCurrentDay]; return _todayCompanionSeconds; }
+- (NSTimeInterval)totalCompanionSeconds { return _totalCompanionSeconds; }
+- (NSInteger)todayInteractions { [self ensureCurrentDay]; return _todayInteractions; }
+- (NSInteger)totalInteractions { return _totalInteractions; }
+- (NSInteger)todayCaught { [self ensureCurrentDay]; return _todayCaught; }
+- (NSInteger)totalCaught { return _totalCaught; }
+- (NSInteger)todayMissed { [self ensureCurrentDay]; return _todayMissed; }
+- (NSInteger)totalMissed { return _totalMissed; }
+- (NSInteger)todayHisses { [self ensureCurrentDay]; return _todayHisses; }
+- (NSInteger)totalHisses { return _totalHisses; }
+- (NSInteger)todaySleeps { [self ensureCurrentDay]; return _todaySleeps; }
+- (NSInteger)totalSleeps { return _totalSleeps; }
+
+- (void)addVisibleSeconds:(NSTimeInterval)seconds {
+    if (seconds <= 0.0 || seconds > 1.5) return;
+    [self ensureCurrentDay];
+    _todayCompanionSeconds += seconds;
+    _totalCompanionSeconds += seconds;
+    _secondsSinceSave += seconds;
+    if (_secondsSinceSave >= 10.0) [self save];
+}
+
+- (void)recordInteraction { [self ensureCurrentDay]; _todayInteractions += 1; _totalInteractions += 1; [self save]; }
+- (void)recordCaught { [self ensureCurrentDay]; _todayCaught += 1; _totalCaught += 1; [self save]; }
+- (void)recordMissed { [self ensureCurrentDay]; _todayMissed += 1; _totalMissed += 1; [self save]; }
+- (void)recordHiss { [self ensureCurrentDay]; _todayHisses += 1; _totalHisses += 1; [self save]; }
+- (void)recordSleep { [self ensureCurrentDay]; _todaySleeps += 1; _totalSleeps += 1; [self save]; }
+
+- (void)save {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults setObject:_dayKey forKey:@"statsDayKey"];
+    [defaults setDouble:_todayCompanionSeconds forKey:@"statsTodayCompanionSeconds"];
+    [defaults setDouble:_totalCompanionSeconds forKey:@"statsTotalCompanionSeconds"];
+    [defaults setInteger:_todayInteractions forKey:@"statsTodayInteractions"];
+    [defaults setInteger:_totalInteractions forKey:@"statsTotalInteractions"];
+    [defaults setInteger:_todayCaught forKey:@"statsTodayCaught"];
+    [defaults setInteger:_totalCaught forKey:@"statsTotalCaught"];
+    [defaults setInteger:_todayMissed forKey:@"statsTodayMissed"];
+    [defaults setInteger:_totalMissed forKey:@"statsTotalMissed"];
+    [defaults setInteger:_todayHisses forKey:@"statsTodayHisses"];
+    [defaults setInteger:_totalHisses forKey:@"statsTotalHisses"];
+    [defaults setInteger:_todaySleeps forKey:@"statsTodaySleeps"];
+    [defaults setInteger:_totalSleeps forKey:@"statsTotalSleeps"];
+    _secondsSinceSave = 0.0;
+}
+
+- (void)resetAll {
+    _dayKey = CurrentStatsDayKey();
+    _todayCompanionSeconds = 0;
+    _totalCompanionSeconds = 0;
+    _todayInteractions = 0;
+    _totalInteractions = 0;
+    _todayCaught = 0;
+    _totalCaught = 0;
+    _todayMissed = 0;
+    _totalMissed = 0;
+    _todayHisses = 0;
+    _totalHisses = 0;
+    _todaySleeps = 0;
+    _totalSleeps = 0;
+    [self save];
+}
+@end
+
+static NSString *FormatCompanionDuration(NSTimeInterval seconds) {
+    NSInteger totalMinutes = (NSInteger)floor(MAX(0.0, seconds) / 60.0);
+    NSInteger hours = totalMinutes / 60;
+    NSInteger minutes = totalMinutes % 60;
+    if (hours > 0) return [NSString stringWithFormat:@"%ld 小时 %ld 分钟", (long)hours, (long)minutes];
+    if (minutes > 0) return [NSString stringWithFormat:@"%ld 分钟", (long)minutes];
+    return @"不到 1 分钟";
+}
+
+static NSTextField *StatsLabel(NSRect frame, NSString *text, NSFont *font, NSColor *color) {
+    NSTextField *label = [[NSTextField alloc] initWithFrame:frame];
+    label.stringValue = text ?: @"";
+    label.font = font;
+    label.textColor = color;
+    label.bezeled = NO;
+    label.drawsBackground = NO;
+    label.editable = NO;
+    label.selectable = NO;
+    label.lineBreakMode = NSLineBreakByTruncatingTail;
+    return label;
+}
+
+static NSBox *StatsCard(NSView *parent, NSRect frame, NSColor *color) {
+    NSBox *box = [[NSBox alloc] initWithFrame:frame];
+    box.boxType = NSBoxCustom;
+    box.borderWidth = 0.0;
+    box.cornerRadius = 14.0;
+    box.fillColor = color;
+    box.contentViewMargins = NSZeroSize;
+    [parent addSubview:box];
+    return box;
+}
+
+static NSTextField *AddTodayCard(NSView *parent,
+                                  NSRect frame,
+                                  NSString *icon,
+                                  NSString *title,
+                                  NSColor *color) {
+    NSBox *card = StatsCard(parent, frame, [color colorWithAlphaComponent:0.11]);
+    [card addSubview:StatsLabel(NSMakeRect(16, 20, 28, 30), icon,
+                                [NSFont systemFontOfSize:23.0], NSColor.labelColor)];
+    [card addSubview:StatsLabel(NSMakeRect(52, 37, frame.size.width - 66, 18), title,
+                                [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium],
+                                NSColor.secondaryLabelColor)];
+    NSTextField *value = StatsLabel(NSMakeRect(52, 12, frame.size.width - 66, 25), @"—",
+                                    [NSFont systemFontOfSize:17.0 weight:NSFontWeightSemibold],
+                                    NSColor.labelColor);
+    [card addSubview:value];
+    return value;
+}
+
+static NSTextField *AddTotalMetric(NSView *parent,
+                                    CGFloat x,
+                                    CGFloat y,
+                                    NSString *title,
+                                    CGFloat width) {
+    [parent addSubview:StatsLabel(NSMakeRect(x, y + 23, width, 17), title,
+                                  [NSFont systemFontOfSize:11.0 weight:NSFontWeightMedium],
+                                  NSColor.secondaryLabelColor)];
+    NSTextField *value = StatsLabel(NSMakeRect(x, y, width, 23), @"—",
+                                    [NSFont systemFontOfSize:15.0 weight:NSFontWeightSemibold],
+                                    NSColor.labelColor);
+    [parent addSubview:value];
+    return value;
+}
+
+@interface StatsWindowController : NSObject
+- (instancetype)initWithStats:(PetStats *)stats;
+- (void)show;
+@end
+
+@implementation StatsWindowController {
+    PetStats *_stats;
+    NSWindow *_window;
+    NSTextField *_todayCompanionLabel;
+    NSTextField *_todayInteractionsLabel;
+    NSTextField *_todayPounceLabel;
+    NSTextField *_todayHissLabel;
+    NSTextField *_todaySleepLabel;
+    NSTextField *_totalCompanionLabel;
+    NSTextField *_totalInteractionsLabel;
+    NSTextField *_totalCaughtLabel;
+    NSTextField *_totalMissedLabel;
+    NSTextField *_totalHissLabel;
+    NSTextField *_totalSleepLabel;
+}
+
+- (instancetype)initWithStats:(PetStats *)stats {
+    self = [super init];
+    if (!self) return nil;
+    _stats = stats;
+    return self;
+}
+
+- (void)buildWindowIfNeeded {
+    if (_window) return;
+    _window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 500, 620)
+                                         styleMask:NSWindowStyleMaskTitled |
+                                                   NSWindowStyleMaskClosable |
+                                                   NSWindowStyleMaskMiniaturizable
+                                           backing:NSBackingStoreBuffered
+                                             defer:NO];
+    _window.title = @"多涅小记";
+    _window.releasedWhenClosed = NO;
+    _window.titlebarAppearsTransparent = YES;
+
+    NSVisualEffectView *root = [[NSVisualEffectView alloc] initWithFrame:_window.contentView.bounds];
+    root.material = NSVisualEffectMaterialSidebar;
+    root.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    root.state = NSVisualEffectStateActive;
+    _window.contentView = root;
+
+    NSBox *avatar = StatsCard(root, NSMakeRect(28, 536, 54, 54),
+                              [NSColor.systemPurpleColor colorWithAlphaComponent:0.16]);
+    avatar.cornerRadius = 27.0;
+    NSTextField *paw = StatsLabel(NSMakeRect(10, 10, 34, 34), @"🐾",
+                                  [NSFont systemFontOfSize:25.0], NSColor.labelColor);
+    paw.alignment = NSTextAlignmentCenter;
+    [avatar addSubview:paw];
+    [root addSubview:StatsLabel(NSMakeRect(98, 558, 360, 32), @"多涅小记",
+                                [NSFont systemFontOfSize:26.0 weight:NSFontWeightBold], NSColor.labelColor)];
+    [root addSubview:StatsLabel(NSMakeRect(99, 536, 360, 20), @"悄悄记下和你待在一起的日子",
+                                [NSFont systemFontOfSize:13.0], NSColor.secondaryLabelColor)];
+
+    NSBox *companionCard = StatsCard(root, NSMakeRect(28, 442, 444, 72),
+                                     [NSColor.systemPurpleColor colorWithAlphaComponent:0.13]);
+    [companionCard addSubview:StatsLabel(NSMakeRect(18, 25, 34, 32), @"♡",
+                                         [NSFont systemFontOfSize:27.0 weight:NSFontWeightLight],
+                                         NSColor.systemPurpleColor)];
+    [companionCard addSubview:StatsLabel(NSMakeRect(62, 40, 180, 18), @"今天的陪伴",
+                                         [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium],
+                                         NSColor.secondaryLabelColor)];
+    _todayCompanionLabel = StatsLabel(NSMakeRect(62, 13, 355, 29), @"—",
+                                      [NSFont systemFontOfSize:21.0 weight:NSFontWeightSemibold],
+                                      NSColor.labelColor);
+    [companionCard addSubview:_todayCompanionLabel];
+
+    [root addSubview:StatsLabel(NSMakeRect(29, 407, 200, 24), @"今天发生了什么",
+                                [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
+    _todayInteractionsLabel = AddTodayCard(root, NSMakeRect(28, 331, 216, 64), @"🐾", @"互动", NSColor.systemBlueColor);
+    _todayPounceLabel = AddTodayCard(root, NSMakeRect(256, 331, 216, 64), @"⚡", @"扑扑记录", NSColor.systemOrangeColor);
+    _todayHissLabel = AddTodayCard(root, NSMakeRect(28, 255, 216, 64), @"💢", @"哈气", NSColor.systemRedColor);
+    _todaySleepLabel = AddTodayCard(root, NSMakeRect(256, 255, 216, 64), @"☾", @"睡觉", NSColor.systemIndigoColor);
+
+    [root addSubview:StatsLabel(NSMakeRect(29, 219, 200, 24), @"从相遇到现在",
+                                [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
+    NSBox *totalCard = StatsCard(root, NSMakeRect(28, 82, 444, 125),
+                                 [NSColor.labelColor colorWithAlphaComponent:0.055]);
+    CGFloat metricWidth = 124.0;
+    _totalCompanionLabel = AddTotalMetric(totalCard, 18, 70, @"陪伴时间", metricWidth);
+    _totalInteractionsLabel = AddTotalMetric(totalCard, 160, 70, @"互动", metricWidth);
+    _totalCaughtLabel = AddTotalMetric(totalCard, 302, 70, @"抓到鼠标", metricWidth);
+    _totalMissedLabel = AddTotalMetric(totalCard, 18, 16, @"扑了个空", metricWidth);
+    _totalHissLabel = AddTotalMetric(totalCard, 160, 16, @"哈气", metricWidth);
+    _totalSleepLabel = AddTotalMetric(totalCard, 302, 16, @"睡觉", metricWidth);
+
+    [root addSubview:StatsLabel(NSMakeRect(29, 51, 300, 18), @"🔒  记录只留在这台 Mac 上",
+                                [NSFont systemFontOfSize:11.0], NSColor.tertiaryLabelColor)];
+    NSButton *resetButton = [[NSButton alloc] initWithFrame:NSMakeRect(356, 42, 116, 30)];
+    resetButton.title = @"清空记录…";
+    resetButton.bezelStyle = NSBezelStyleRounded;
+    resetButton.target = self;
+    resetButton.action = @selector(resetStats:);
+    [root addSubview:resetButton];
+    [_window center];
+}
+
+- (void)refresh {
+    [_stats save];
+    _todayCompanionLabel.stringValue = FormatCompanionDuration(_stats.todayCompanionSeconds);
+    _todayInteractionsLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.todayInteractions];
+    _todayPounceLabel.stringValue = [NSString stringWithFormat:@"抓到 %ld · 扑空 %ld",
+                                     (long)_stats.todayCaught, (long)_stats.todayMissed];
+    _todayHissLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.todayHisses];
+    _todaySleepLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.todaySleeps];
+    _totalCompanionLabel.stringValue = FormatCompanionDuration(_stats.totalCompanionSeconds);
+    _totalInteractionsLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalInteractions];
+    _totalCaughtLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalCaught];
+    _totalMissedLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalMissed];
+    _totalHissLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalHisses];
+    _totalSleepLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalSleeps];
+}
+
+- (void)show {
+    [self buildWindowIfNeeded];
+    [self refresh];
+    [NSApp activateIgnoringOtherApps:YES];
+    [_window makeKeyAndOrderFront:nil];
+}
+
+- (void)resetStats:(id)sender {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"要重置多涅小记吗？";
+    alert.informativeText = @"今天和累计的所有记录都会清零，此操作无法撤销。";
+    [alert addButtonWithTitle:@"取消"];
+    [alert addButtonWithTitle:@"重置"];
+    if ([alert runModal] != NSAlertSecondButtonReturn) return;
+    [_stats resetAll];
+    [self refresh];
+}
+@end
+
 static NSWindow *gHelpWindow;
 
 static void AppendHelpParagraph(NSMutableAttributedString *text,
@@ -94,7 +443,7 @@ static NSAttributedString *HelpContent(void) {
     AppendHelpParagraph(text, @"和她互动\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
     AppendHelpParagraph(text, @"•  单击她：挥爪\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  双击她：跳一下\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
-    AppendHelpParagraph(text, @"•  拖动她：移动到喜欢的位置\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
+    AppendHelpParagraph(text, @"•  拖动她：移动到喜欢的位置，放下后她会生气哈气\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  多戳她几下：她可能会不耐烦\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  在她附近快速晃动鼠标：她可能会盯住并扑过去\n", [NSFont systemFontOfSize:14.0], 10.0, YES);
     AppendHelpParagraph(text, @"扑到鼠标后，她会露出得意脸；扑空则会生气哈气。\n", [NSFont systemFontOfSize:14.0], 18.0, NO);
@@ -309,6 +658,9 @@ static void ShowHelpWindow(void) {
 - (void)setClickThrough:(BOOL)enabled;
 - (void)setPetScale:(CGFloat)scale;
 - (void)resetPosition;
+- (void)savePosition;
+- (void)saveStats;
+- (void)showStats;
 - (void)triggerWave;
 - (void)triggerProud;
 - (void)triggerJump;
@@ -415,6 +767,9 @@ static void ShowHelpWindow(void) {
     NSMenuItem *activityRoot = [[NSMenuItem alloc] initWithTitle:@"活动性" action:nil keyEquivalent:@""];
     activityRoot.submenu = activityMenu;
     [menu addItem:activityRoot];
+    NSMenuItem *stats = [[NSMenuItem alloc] initWithTitle:@"多涅小记…" action:@selector(contextStats:) keyEquivalent:@""];
+    stats.target = self;
+    [menu addItem:stats];
     NSMenuItem *help = [[NSMenuItem alloc] initWithTitle:@"使用帮助…" action:@selector(contextHelp:) keyEquivalent:@""];
     help.target = self;
     [menu addItem:help];
@@ -434,6 +789,7 @@ static void ShowHelpWindow(void) {
 - (void)contextChangeActivity:(NSMenuItem *)sender {
     [self.controller setActivityLevel:(PetActivityLevel)[sender.representedObject integerValue]];
 }
+- (void)contextStats:(id)sender { [self.controller showStats]; }
 - (void)contextHelp:(id)sender { ShowHelpWindow(); }
 - (void)contextQuit:(id)sender { [NSApp terminate:nil]; }
 @end
@@ -480,12 +836,18 @@ static void ShowHelpWindow(void) {
     BOOL _sleeping;
     BOOL _wakeProximityArmed;
     NSInteger _wakeHoverTicks;
+    PetStats *_stats;
+    StatsWindowController *_statsWindowController;
+    NSTimeInterval _lastStatsTickTime;
 }
 
 - (instancetype)initWithAtlas:(SpriteAtlas *)atlas {
     self = [super init];
     if (!self) return nil;
     _atlas = atlas;
+    _stats = [[PetStats alloc] init];
+    _statsWindowController = [[StatsWindowController alloc] initWithStats:_stats];
+    _lastStatsTickTime = NSDate.timeIntervalSinceReferenceDate;
     double savedScale = [NSUserDefaults.standardUserDefaults doubleForKey:@"petScale"];
     _scale = savedScale == 0 ? kStandardPetScale
                              : MAX(kMinimumPetScale, MIN(kMaximumPetScale, savedScale));
@@ -536,7 +898,7 @@ static void ShowHelpWindow(void) {
     [_panel addChildWindow:_speechPanel ordered:NSWindowAbove];
     [_speechPanel orderOut:nil];
 
-    [self positionAtBottomRight];
+    if (![self restorePosition]) [self positionAtBottomRight];
     [self setMode:PetModeIdle ticks:80 loops:0];
     _lastInteractionTime = NSDate.timeIntervalSinceReferenceDate;
     _petIsVisible = NO;
@@ -579,11 +941,13 @@ static void ShowHelpWindow(void) {
     [_panel setFrame:NSMakeRect(origin.x, origin.y, size.width, size.height) display:YES];
     [self clampToCurrentScreen];
     [self positionSpeechBubble];
+    [self savePosition];
 }
 
 - (void)resetPosition {
     [self noteInteraction];
     [self positionAtBottomRight];
+    [self savePosition];
     [self refreshVisibility];
 }
 
@@ -643,6 +1007,7 @@ static void ShowHelpWindow(void) {
     [self startHissWithLoops:3];
 }
 - (void)startHissWithLoops:(NSInteger)loops {
+    [_stats recordHiss];
     [self cancelHunt];
     if (_mode == PetModeHissing) {
         NSPoint origin = _panel.frame.origin;
@@ -683,6 +1048,7 @@ static void ShowHelpWindow(void) {
 }
 
 - (void)startSleeping {
+    [_stats recordSleep];
     [self cancelHunt];
     _sleepRequested = NO;
     _sleeping = YES;
@@ -769,6 +1135,15 @@ static void ShowHelpWindow(void) {
 }
 - (void)petMouseDraggedTo:(NSPoint)location {
     [self noteInteraction];
+    if (!_dragging) {
+        if (_mode == PetModeHissing) {
+            _hissBaseX = _panel.frame.origin.x;
+            [self setMode:PetModeIdle ticks:80 loops:0];
+        }
+        [_speechTimer invalidate];
+        _speechTimer = nil;
+        [_speechPanel orderOut:nil];
+    }
     _dragging = YES;
     [_panel setFrameOrigin:NSMakePoint(location.x - _dragOffset.x,
                                        location.y - _dragOffset.y)];
@@ -776,6 +1151,13 @@ static void ShowHelpWindow(void) {
 - (void)petMouseUpWithClickCount:(NSInteger)clickCount {
     _dragging = NO;
     [self clampToCurrentScreen];
+    [_stats recordInteraction];
+    if (clickCount == 0) {
+        _pokeCount = 0;
+        [self savePosition];
+        [self triggerHiss];
+        return;
+    }
     if (clickCount >= 2) {
         _pokeCount = 0;
         [self triggerJump];
@@ -798,6 +1180,10 @@ static void ShowHelpWindow(void) {
         _fullscreenCheckClock = 0;
         [self refreshVisibility];
     }
+    NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
+    NSTimeInterval elapsed = now - _lastStatsTickTime;
+    _lastStatsTickTime = now;
+    if (_petIsVisible) [_stats addVisibleSeconds:elapsed];
     if (!_petIsVisible) return;
     if (_dragging) return;
     if (_huntCooldownTicks > 0) _huntCooldownTicks -= 1;
@@ -1031,8 +1417,13 @@ static void ShowHelpWindow(void) {
             CGFloat verticalMiss = fabs(pointer.y - NSMidY(_panel.frame));
             BOOL caught = horizontalMiss < _panel.frame.size.width * 0.42 &&
                           verticalMiss < _panel.frame.size.height * 1.35;
-            if (caught) [self startProud];
-            else [self startHissWithLoops:2];
+            if (caught) {
+                [_stats recordCaught];
+                [self startProud];
+            } else {
+                [_stats recordMissed];
+                [self startHissWithLoops:2];
+            }
         } else {
             [self chooseNextRoamPhase];
         }
@@ -1163,6 +1554,53 @@ static void ShowHelpWindow(void) {
                                        NSMinY(visible) + 8)];
 }
 
+- (void)savePosition {
+    NSScreen *screen = [self screenForPanel];
+    if (!screen) return;
+    NSRect visible = screen.visibleFrame;
+    CGFloat availableWidth = MAX(0.0, NSWidth(visible) - NSWidth(_panel.frame));
+    CGFloat availableHeight = MAX(0.0, NSHeight(visible) - NSHeight(_panel.frame));
+    CGFloat relativeX = availableWidth > 0.0
+        ? (_panel.frame.origin.x - NSMinX(visible)) / availableWidth : 0.0;
+    CGFloat relativeY = availableHeight > 0.0
+        ? (_panel.frame.origin.y - NSMinY(visible)) / availableHeight : 0.0;
+    relativeX = MAX(0.0, MIN(1.0, relativeX));
+    relativeY = MAX(0.0, MIN(1.0, relativeY));
+
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults setBool:YES forKey:@"petPositionSaved"];
+    [defaults setDouble:relativeX forKey:@"petPositionRelativeX"];
+    [defaults setDouble:relativeY forKey:@"petPositionRelativeY"];
+    NSNumber *screenNumber = screen.deviceDescription[@"NSScreenNumber"];
+    if (screenNumber) [defaults setInteger:screenNumber.integerValue forKey:@"petPositionDisplayID"];
+}
+
+- (BOOL)restorePosition {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults boolForKey:@"petPositionSaved"]) return NO;
+
+    NSScreen *targetScreen = nil;
+    NSInteger savedDisplayID = [defaults integerForKey:@"petPositionDisplayID"];
+    for (NSScreen *screen in NSScreen.screens) {
+        NSNumber *screenNumber = screen.deviceDescription[@"NSScreenNumber"];
+        if (screenNumber && screenNumber.integerValue == savedDisplayID) {
+            targetScreen = screen;
+            break;
+        }
+    }
+    if (!targetScreen) targetScreen = NSScreen.mainScreen;
+    if (!targetScreen) return NO;
+
+    CGFloat relativeX = MAX(0.0, MIN(1.0, [defaults doubleForKey:@"petPositionRelativeX"]));
+    CGFloat relativeY = MAX(0.0, MIN(1.0, [defaults doubleForKey:@"petPositionRelativeY"]));
+    NSRect visible = targetScreen.visibleFrame;
+    CGFloat availableWidth = MAX(0.0, NSWidth(visible) - NSWidth(_panel.frame));
+    CGFloat availableHeight = MAX(0.0, NSHeight(visible) - NSHeight(_panel.frame));
+    [_panel setFrameOrigin:NSMakePoint(NSMinX(visible) + relativeX * availableWidth,
+                                       NSMinY(visible) + relativeY * availableHeight)];
+    return YES;
+}
+
 - (void)clampToCurrentScreen {
     NSScreen *screen = [self screenForPanel];
     if (!screen) return;
@@ -1180,6 +1618,8 @@ static void ShowHelpWindow(void) {
     }
     return NSScreen.mainScreen;
 }
+- (void)showStats { [_statsWindowController show]; }
+- (void)saveStats { [_stats save]; }
 @end
 
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate>
@@ -1208,6 +1648,11 @@ static void ShowHelpWindow(void) {
     [self configureStatusMenu];
 }
 
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    [_controller savePosition];
+    [_controller saveStats];
+}
+
 - (NSMenuItem *)item:(NSString *)title action:(SEL)action key:(NSString *)key {
     NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:key];
     item.target = self;
@@ -1226,6 +1671,7 @@ static void ShowHelpWindow(void) {
     [menu addItem:[self item:@"哈气！" action:@selector(hiss:) key:@""]];
     _sleepItem = [self item:@"让她睡觉" action:@selector(toggleSleep:) key:@""];
     [menu addItem:_sleepItem];
+    [menu addItem:[self item:@"多涅小记…" action:@selector(showStats:) key:@""]];
     [menu addItem:NSMenuItem.separatorItem];
     _cursorHuntItem = [self item:@"自动扑向鼠标" action:@selector(toggleCursorHunt:) key:@""];
     [menu addItem:_cursorHuntItem];
@@ -1314,6 +1760,7 @@ static void ShowHelpWindow(void) {
 - (void)jump:(id)sender { [_controller triggerJump]; }
 - (void)hiss:(id)sender { [_controller triggerHiss]; }
 - (void)toggleSleep:(id)sender { [_controller toggleSleep]; }
+- (void)showStats:(id)sender { [_controller showStats]; }
 - (void)toggleCursorHunt:(id)sender { [_controller setCursorHuntEnabled:!_controller.cursorHuntEnabled]; }
 - (void)resetPosition:(id)sender { [_controller resetPosition]; }
 - (void)togglePause:(id)sender { [_controller setPaused:!_controller.paused]; }
