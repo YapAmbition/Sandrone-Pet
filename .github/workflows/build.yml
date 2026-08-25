@@ -2,7 +2,7 @@ name: macOS Build and Release
 
 on:
   push:
-    branches: [master]
+    branches: [master, feature/electron-windows]
   pull_request:
   workflow_dispatch:
 
@@ -54,8 +54,61 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Electron dependencies
+        working-directory: electron
+        run: npm ci --include=dev
+
+      - name: Validate cross-platform logic
+        working-directory: electron
+        run: npm test
+
+      - name: Build fullscreen detector
+        working-directory: electron
+        run: npm run build:helper
+
+      - name: Build Windows installer and portable app
+        working-directory: electron
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run dist:win
+
+      - name: Validate Windows packages
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem "electron/dist/Hissy-Sandrone-Windows-Setup-*.exe"
+          $portable = Get-ChildItem "electron/dist/Hissy-Sandrone-Windows-Portable-*.exe"
+          if ($setup.Count -ne 1 -or $portable.Count -ne 1) {
+            throw "Expected exactly one Windows installer and one portable package."
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: hissy-sandrone-windows
+          path: electron/dist/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
   release:
-    needs: build
+    needs: [build, build-windows]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -67,6 +120,12 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: hissy-sandrone-macos-${{ needs.build.outputs.version }}
+          path: release-assets
+
+      - name: Download validated Windows packages
+        uses: actions/download-artifact@v7
+        with:
+          name: hissy-sandrone-windows
           path: release-assets
 
       - name: Check release state
@@ -96,6 +155,7 @@ jobs:
         run: |
           gh release create "$TAG" \
             "release-assets/Hissy-Sandrone-macOS.zip" \
+            release-assets/Hissy-Sandrone-Windows-*.exe \
             --target "$GITHUB_SHA" \
             --title "哈气桑多涅 $TAG" \
             --generate-notes

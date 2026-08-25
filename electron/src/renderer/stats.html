@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>多涅小记</title>
+  <link rel="stylesheet" href="stats.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="avatar">🐾</div>
+      <div><h1>多涅小记</h1><p>悄悄记下和你待在一起的日子</p></div>
+    </header>
+
+    <section class="companion card">
+      <span class="heart">♡</span>
+      <div><small>今天的陪伴</small><strong id="today-companion">—</strong></div>
+    </section>
+
+    <h2>今天发生了什么</h2>
+    <section class="today-grid">
+      <article class="metric blue"><span>🐾</span><div><small>互动</small><strong id="today-interactions">—</strong></div></article>
+      <article class="metric orange"><span>⚡</span><div><small>扑扑记录</small><strong id="today-pounce">—</strong></div></article>
+      <article class="metric red"><span>💢</span><div><small>哈气</small><strong id="today-hisses">—</strong></div></article>
+      <article class="metric indigo"><span>☾</span><div><small>睡觉</small><strong id="today-sleeps">—</strong></div></article>
+    </section>
+
+    <h2>从相遇到现在</h2>
+    <section class="totals card">
+      <div><small>陪伴时间</small><strong id="total-companion">—</strong></div>
+      <div><small>互动</small><strong id="total-interactions">—</strong></div>
+      <div><small>抓到鼠标</small><strong id="total-caught">—</strong></div>
+      <div><small>扑了个空</small><strong id="total-missed">—</strong></div>
+      <div><small>哈气</small><strong id="total-hisses">—</strong></div>
+      <div><small>睡觉</small><strong id="total-sleeps">—</strong></div>
+    </section>
+
+    <footer><span>🔒 记录只留在这台电脑上</span><button id="reset">清空记录…</button></footer>
+  </main>
+  <script src="stats.js"></script>
+</body>
+</html>
