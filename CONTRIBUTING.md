@@ -29,7 +29,7 @@
 4. 将改动提交并推送到 `master`。
 5. GitHub Actions 会读取版本号，自动创建 `v版本号` 标签、生成 Release 说明，并上传 `Hissy-Sandrone-macOS.zip`。
 
-已存在对应 Release 时，同版本的后续推送只会构建和校验，不会覆盖已发布的安装包。发布新版本前必须先更新 `CFBundleShortVersionString`。
+已存在对应 Release 时，同版本的后续推送会在发布阶段明确失败，避免覆盖或混用已发布的安装包。发布新版本前必须先更新 `CFBundleShortVersionString`。
 
 ## 素材和权利
 
