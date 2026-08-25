@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { JsonStore } = require('./store.cjs');
 const { PetStats } = require('./stats.cjs');
 const { MovementAreaTracker } = require('./movement-area.cjs');
+const { windowsLaunchExecutable } = require('./windows-paths.cjs');
 const SMOKE_TEST = process.env.HISSY_SMOKE_TEST === '1';
 
 const CELL_WIDTH = 192;
@@ -251,7 +252,10 @@ function setSetting(key, value) {
   if (key === 'clickThrough') petWindow?.setIgnoreMouseEvents(Boolean(value), { forward: true });
   if (key === 'launchAtLogin') {
     if (app.isPackaged && process.platform === 'win32') {
-      app.setLoginItemSettings({ openAtLogin: Boolean(value), path: process.execPath });
+      app.setLoginItemSettings({
+        openAtLogin: Boolean(value),
+        path: windowsLaunchExecutable(process.execPath)
+      });
     }
   }
   if (key === 'visibilityMode') applyVisibility();
@@ -429,6 +433,14 @@ function startFullscreenMonitor() {
     return;
   }
   fullscreenHelper = spawn(helper, [String(process.pid)], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  const handleHelperStopped = (error) => {
+    if (error) console.warn(`Fullscreen helper unavailable: ${error.message}`);
+    fullscreenHelper = null;
+    if (fullscreenDetected) {
+      fullscreenDetected = false;
+      applyVisibility();
+    }
+  };
   let pending = '';
   fullscreenHelper.stdout.setEncoding('utf8');
   fullscreenHelper.stdout.on('data', (chunk) => {
@@ -443,7 +455,8 @@ function startFullscreenMonitor() {
       }
     }
   });
-  fullscreenHelper.on('exit', () => { fullscreenHelper = null; });
+  fullscreenHelper.on('error', handleHelperStopped);
+  fullscreenHelper.on('exit', () => handleHelperStopped());
 }
 
 function registerIpc() {

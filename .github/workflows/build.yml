@@ -98,6 +98,19 @@ jobs:
           if ($setup.Count -ne 1 -or $portable.Count -ne 1) {
             throw "Expected exactly one Windows installer and one portable package."
           }
+          $requiredFiles = @(
+            "electron/dist/win-unpacked/resources/app.asar",
+            "electron/dist/win-unpacked/resources/assets/AppIcon.png",
+            "electron/dist/win-unpacked/resources/assets/spritesheet.png",
+            "electron/dist/win-unpacked/resources/assets/Proud/proud-0.png",
+            "electron/dist/win-unpacked/resources/assets/Sleep/sleep-0.png",
+            "electron/dist/win-unpacked/resources/bin/fullscreen-helper.exe"
+          )
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path $file -PathType Leaf)) {
+              throw "Required packaged resource is missing: $file"
+            }
+          }
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v7
@@ -136,9 +149,8 @@ jobs:
           TAG: ${{ needs.build.outputs.tag }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Release $TAG already exists; build validation completed without republishing."
-            exit 0
+            echo "Release $TAG already exists. Bump CFBundleShortVersionString before publishing." >&2
+            exit 1
           fi
           if gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG exists without a release. Bump CFBundleShortVersionString or remove the stale tag." >&2

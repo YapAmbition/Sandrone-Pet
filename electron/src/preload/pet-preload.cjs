@@ -4,7 +4,6 @@ contextBridge.exposeInMainWorld('petAPI', {
   ready: () => ipcRenderer.invoke('pet:ready'),
   rendererReady: () => ipcRenderer.send('pet:renderer-ready'),
   moveTo: (x, y) => ipcRenderer.send('pet:move-to', { x, y }),
-  interaction: (kind) => ipcRenderer.send('pet:interaction', kind),
   record: (metric) => ipcRenderer.send('stats:record', metric),
   showSpeech: (text, duration) => ipcRenderer.send('speech:show', { text, duration }),
   hideSpeech: () => ipcRenderer.send('speech:hide'),

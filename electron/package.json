@@ -7,9 +7,9 @@
   "main": "src/main/main.cjs",
   "scripts": {
     "start": "electron .",
-    "test": "node scripts/check-version.cjs && node --test tests/*.test.mjs",
-    "dist:mac:test": "electron-builder --mac dir --arm64",
-    "dist:win": "electron-builder --win nsis portable --x64",
+    "test": "node scripts/check-version.cjs && node scripts/check-build-config.cjs && node --test tests/*.test.mjs",
+    "dist:mac:test": "electron-builder --mac dir --arm64 --config.electronDist=node_modules/electron/dist",
+    "dist:win": "electron-builder --win nsis portable --x64 --publish never",
     "build:helper": "cmd /c scripts\\build-helper.cmd"
   },
   "devDependencies": {
@@ -20,7 +20,6 @@
     "appId": "io.github.yapambition.hissy-sandrone",
     "productName": "哈气桑多涅",
     "asar": true,
-    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "dist",
       "buildResources": "build-resources"
