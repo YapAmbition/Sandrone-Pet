@@ -1,0 +1,66 @@
+{
+  "name": "hissy-sandrone-electron",
+  "version": "1.11.1",
+  "private": true,
+  "description": "哈气桑多涅 Windows 桌面宠物（Electron）",
+  "author": "Sandrone Pet contributors",
+  "main": "src/main/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node scripts/check-version.cjs && node scripts/check-build-config.cjs && node --test tests/*.test.mjs",
+    "dist:mac:test": "electron-builder --mac dir --arm64 --config.electronDist=node_modules/electron/dist",
+    "dist:win": "electron-builder --win nsis portable --x64 --publish never",
+    "build:helper": "cmd /c scripts\\build-helper.cmd"
+  },
+  "devDependencies": {
+    "electron": "43.4.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "io.github.yapambition.hissy-sandrone",
+    "productName": "哈气桑多涅",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../Assets",
+        "to": "assets",
+        "filter": ["**/*", "!**/.DS_Store"]
+      },
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "target": ["dir"]
+    },
+    "win": {
+      "icon": "../Assets/AppIcon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "哈气桑多涅",
+      "artifactName": "Hissy-Sandrone-Windows-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Hissy-Sandrone-Windows-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

@@ -2,3 +2,7 @@ build/
 AppIcon.iconset/
 .DS_Store
 *.xcuserstate
+electron/node_modules/
+electron/dist/
+electron/bin/*.exe
+electron/*.log

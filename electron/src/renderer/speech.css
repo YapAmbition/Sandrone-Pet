@@ -1,0 +1,57 @@
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.bubble {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 5px;
+  bottom: 14px;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 7px 16px;
+  color: #44343d;
+  background: rgba(255, 250, 252, 0.96);
+  border: 2px solid rgba(103, 69, 85, 0.72);
+  border-radius: 18px;
+  box-shadow: 0 5px 15px rgba(47, 27, 38, 0.18);
+  font-size: 17px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.bubble::before,
+.bubble::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 8px);
+  bottom: -11px;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 11px solid rgba(103, 69, 85, 0.72);
+}
+
+.bubble::after {
+  left: calc(50% - 7px);
+  bottom: -8px;
+  border-left-width: 8px;
+  border-right-width: 8px;
+  border-top: 10px solid rgba(255, 250, 252, 0.98);
+}
+
+@media (prefers-color-scheme: dark) {
+  .bubble {
+    color: #f7eef2;
+    background: rgba(55, 45, 51, 0.97);
+    border-color: rgba(226, 191, 207, 0.78);
+  }
+  .bubble::before { border-top-color: rgba(226, 191, 207, 0.78); }
+  .bubble::after { border-top-color: rgba(55, 45, 51, 0.98); }
+}
