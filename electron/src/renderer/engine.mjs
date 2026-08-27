@@ -117,6 +117,9 @@ export class PetEngine {
     if (previousActivity !== this.settings.activityLevel && this.settings.activityLevel === 'quiet' &&
         ['idle', 'walkLeft', 'walkRight'].includes(this.mode)) {
       this.setMode('idle', Number.MAX_SAFE_INTEGER, 0);
+    } else if (previousActivity === 'quiet' && this.settings.activityLevel !== 'quiet' &&
+        this.mode === 'idle') {
+      this.chooseNextRoamPhase();
     }
   }
 
@@ -144,10 +147,11 @@ export class PetEngine {
       this.blockedMoveTicks += 1;
       this.acceptedMoveTicks = 0;
       if (Math.abs(errorX) > 6 || this.blockedMoveTicks >= 2) {
+        const remainingTicks = Math.max(1, this.phaseTicks);
         this.blockedMoveTicks = 0;
         this.acceptedMoveTicks = 0;
         this.pendingMove = null;
-        this.setMode(blockedLeft ? 'walkRight' : 'walkLeft', randomBetween(80, 180), 0);
+        this.setMode(blockedLeft ? 'walkRight' : 'walkLeft', remainingTicks, 0);
       }
       return;
     }
@@ -181,6 +185,10 @@ export class PetEngine {
 
   triggerWave() {
     this.noteInteraction();
+    this.startWave();
+  }
+
+  startWave() {
     this.cancelHunt();
     this.setMode('waving', 90, 2);
   }
@@ -198,6 +206,10 @@ export class PetEngine {
 
   triggerJump() {
     this.noteInteraction();
+    this.startJump();
+  }
+
+  startJump() {
     this.cancelHunt();
     if (this.mode === 'jumping') this.moveTo(this.environment.bounds.x, this.jumpBaseY);
     this.jumpBaseY = this.environment.bounds.y;
@@ -486,10 +498,10 @@ export class PetEngine {
     let x = this.environment.bounds.x + 2.1 * this.settings.scale * (this.mode === 'walkRight' ? 1 : -1);
     if (x + this.environment.bounds.width >= area.x + area.width) {
       x = area.x + area.width - this.environment.bounds.width;
-      this.setMode('walkLeft', randomBetween(80, 180), 0);
+      this.setMode('walkLeft', Math.max(1, this.phaseTicks), 0);
     } else if (x <= area.x) {
       x = area.x;
-      this.setMode('walkRight', randomBetween(80, 180), 0);
+      this.setMode('walkRight', Math.max(1, this.phaseTicks), 0);
     }
     this.moveTo(x, clamp(this.environment.bounds.y, area.y + 4,
       area.y + area.height - this.environment.bounds.height));
@@ -500,18 +512,24 @@ export class PetEngine {
     if (this.settings.paused || this.settings.activityLevel === 'quiet') {
       return this.setMode('idle', Number.MAX_SAFE_INTEGER, 0);
     }
+    // Every active action must be followed by a real idle window. Mouse hunting
+    // only runs while idle, so autonomous movement cannot starve interaction.
+    if (this.mode !== 'idle') return this.startTimedIdle();
+
     const roll = randomBetween(0, 99);
-    if (this.settings.activityLevel === 'lively') {
-      if (roll < 42) this.setMode('idle', randomBetween(60, 150), 0);
-      else if (roll < 69) this.setMode('walkRight', randomBetween(90, 210), 0);
-      else if (roll < 96) this.setMode('walkLeft', randomBetween(90, 210), 0);
-      else this.triggerWave();
-      return;
-    }
-    if (roll < 50) this.setMode('idle', randomBetween(144, 360), 0);
-    else if (roll < 73) this.setMode('walkRight', randomBetween(90, 210), 0);
-    else if (roll < 96) this.setMode('walkLeft', randomBetween(90, 210), 0);
-    else this.triggerWave();
+    if (roll < 25) this.startTimedIdle();
+    else if (roll < 45) this.setMode('walkRight', randomBetween(72, 120), 0);
+    else if (roll < 65) this.setMode('walkLeft', randomBetween(72, 120), 0);
+    else if (roll < 80) this.startWave();
+    else if (roll < 90) this.startJump();
+    else this.startHiss(2);
+  }
+
+  startTimedIdle() {
+    const ticks = this.settings.activityLevel === 'lively'
+      ? randomBetween(36, 72)
+      : randomBetween(72, 144);
+    this.setMode('idle', ticks, 0);
   }
 
   setMode(mode, ticks, loops) {

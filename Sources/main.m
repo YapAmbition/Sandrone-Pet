@@ -32,6 +32,8 @@ static const CGFloat kCellHeight = 208.0;
 static const CGFloat kStandardPetScale = 0.75;
 static const CGFloat kMinimumPetScale = 0.5625;
 static const CGFloat kMaximumPetScale = 1.125;
+static const CGFloat kSpeechBubbleWidth = 132.0;
+static const CGFloat kSpeechBubbleHeight = 62.0;
 static const NSTimeInterval kAutomaticSleepDelay = 60.0;
 
 static NSInteger RowForMode(PetMode mode) { return mode == PetModeProud ? 6 : (NSInteger)mode; }
@@ -605,30 +607,35 @@ static void ShowHelpWindow(void) {
 }
 - (void)drawRect:(NSRect)dirtyRect {
     [super drawRect:dirtyRect];
-    NSRect bubbleRect = NSMakeRect(2.0, 12.0, NSWidth(self.bounds) - 4.0, NSHeight(self.bounds) - 14.0);
+    CGFloat scale = NSWidth(self.bounds) / kSpeechBubbleWidth;
+    NSRect bubbleRect = NSMakeRect(2.0 * scale, 12.0 * scale,
+                                   NSWidth(self.bounds) - 4.0 * scale,
+                                   NSHeight(self.bounds) - 14.0 * scale);
     NSBezierPath *tail = [NSBezierPath bezierPath];
     CGFloat centerX = NSMidX(self.bounds);
-    [tail moveToPoint:NSMakePoint(centerX - 10.0, 14.0)];
-    [tail lineToPoint:NSMakePoint(centerX, 2.0)];
-    [tail lineToPoint:NSMakePoint(centerX + 8.0, 14.0)];
+    [tail moveToPoint:NSMakePoint(centerX - 10.0 * scale, 14.0 * scale)];
+    [tail lineToPoint:NSMakePoint(centerX, 2.0 * scale)];
+    [tail lineToPoint:NSMakePoint(centerX + 8.0 * scale, 14.0 * scale)];
     [tail closePath];
     NSColor *fillColor = [NSColor colorWithRed:1.0 green:0.97 blue:0.94 alpha:0.98];
     NSColor *strokeColor = [NSColor colorWithRed:0.30 green:0.16 blue:0.17 alpha:1.0];
     [fillColor setFill];
     [strokeColor setStroke];
-    tail.lineWidth = 2.0;
+    tail.lineWidth = 2.0 * scale;
     [tail fill];
     [tail stroke];
 
-    NSBezierPath *bubble = [NSBezierPath bezierPathWithRoundedRect:bubbleRect xRadius:15.0 yRadius:15.0];
-    bubble.lineWidth = 2.0;
+    NSBezierPath *bubble = [NSBezierPath bezierPathWithRoundedRect:bubbleRect
+                                                           xRadius:15.0 * scale
+                                                           yRadius:15.0 * scale];
+    bubble.lineWidth = 2.0 * scale;
     [fillColor setFill];
     [strokeColor setStroke];
     [bubble fill];
     [bubble stroke];
 
     NSDictionary *attributes = @{
-        NSFontAttributeName: [NSFont boldSystemFontOfSize:16.0],
+        NSFontAttributeName: [NSFont boldSystemFontOfSize:16.0 * scale],
         NSForegroundColorAttributeName: strokeColor
     };
     NSSize textSize = [self.text sizeWithAttributes:attributes];
@@ -750,9 +757,9 @@ static void ShowHelpWindow(void) {
     [menu addItem:visibilityRoot];
     NSMenu *activityMenu = [[NSMenu alloc] initWithTitle:@"活动性"];
     NSArray *activityOptions = @[
-        @[@"默认（约 65% 待机）", @(PetActivityLevelDefault)],
-        @[@"活泼（约 35% 待机）", @(PetActivityLevelLively)],
-        @[@"安静（始终待机）", @(PetActivityLevelQuiet)]
+        @[@"默认", @(PetActivityLevelDefault)],
+        @[@"活泼", @(PetActivityLevelLively)],
+        @[@"安静（不主动活动）", @(PetActivityLevelQuiet)]
     ];
     for (NSArray *option in activityOptions) {
         NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:option[0]
@@ -881,11 +888,14 @@ static void ShowHelpWindow(void) {
                                 NSWindowCollectionBehaviorStationary |
                                 NSWindowCollectionBehaviorIgnoresCycle;
 
-    _speechPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 132, 62)
+    CGFloat speechScale = _scale / kStandardPetScale;
+    NSSize speechSize = NSMakeSize(kSpeechBubbleWidth * speechScale,
+                                   kSpeechBubbleHeight * speechScale);
+    _speechPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, speechSize.width, speechSize.height)
                                               styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
                                                 backing:NSBackingStoreBuffered
                                                   defer:NO];
-    _speechView = [[SpeechBubbleView alloc] initWithFrame:NSMakeRect(0, 0, 132, 62)];
+    _speechView = [[SpeechBubbleView alloc] initWithFrame:NSMakeRect(0, 0, speechSize.width, speechSize.height)];
     _speechPanel.contentView = _speechView;
     _speechPanel.backgroundColor = NSColor.clearColor;
     _speechPanel.opaque = NO;
@@ -939,6 +949,10 @@ static void ShowHelpWindow(void) {
     NSSize size = NSMakeSize(kCellWidth * clamped, kCellHeight * clamped);
     NSPoint origin = NSMakePoint(NSMidX(oldFrame) - size.width / 2.0, NSMinY(oldFrame));
     [_panel setFrame:NSMakeRect(origin.x, origin.y, size.width, size.height) display:YES];
+    CGFloat speechScale = clamped / kStandardPetScale;
+    [_speechPanel setContentSize:NSMakeSize(kSpeechBubbleWidth * speechScale,
+                                            kSpeechBubbleHeight * speechScale)];
+    _speechView.needsDisplay = YES;
     [self clampToCurrentScreen];
     [self positionSpeechBubble];
     [self savePosition];
@@ -973,6 +987,9 @@ static void ShowHelpWindow(void) {
 
 - (void)triggerWave {
     [self noteInteraction];
+    [self startWave];
+}
+- (void)startWave {
     [self cancelHunt];
     [self setMode:PetModeWaving ticks:90 loops:2];
 }
@@ -987,6 +1004,9 @@ static void ShowHelpWindow(void) {
 }
 - (void)triggerJump {
     [self noteInteraction];
+    [self startJump];
+}
+- (void)startJump {
     [self cancelHunt];
     if (_mode == PetModeJumping) {
         NSPoint origin = _panel.frame.origin;
@@ -1438,11 +1458,11 @@ static void ShowHelpWindow(void) {
     origin.x += 2.1 * _scale * direction;
     NSRect visible = screen.visibleFrame;
     if (origin.x + _panel.frame.size.width >= NSMaxX(visible)) {
-        origin.x = NSMaxX(visible) - _panel.frame.size.width;
-        [self setMode:PetModeWalkLeft ticks:RandomBetween(80, 180) loops:0];
+      origin.x = NSMaxX(visible) - _panel.frame.size.width;
+        [self setMode:PetModeWalkLeft ticks:MAX(1, _phaseTicks) loops:0];
     } else if (origin.x <= NSMinX(visible)) {
         origin.x = NSMinX(visible);
-        [self setMode:PetModeWalkRight ticks:RandomBetween(80, 180) loops:0];
+        [self setMode:PetModeWalkRight ticks:MAX(1, _phaseTicks) loops:0];
     }
     origin.y = MAX(NSMinY(visible) + 4, MIN(origin.y, NSMaxY(visible) - _panel.frame.size.height));
     [_panel setFrameOrigin:origin];
@@ -1461,18 +1481,27 @@ static void ShowHelpWindow(void) {
         [self setMode:PetModeIdle ticks:NSIntegerMax loops:0];
         return;
     }
-    NSInteger roll = RandomBetween(0, 99);
-    if (_activityLevel == PetActivityLevelLively) {
-        if (roll < 42) [self setMode:PetModeIdle ticks:RandomBetween(60, 150) loops:0];
-        else if (roll < 69) [self setMode:PetModeWalkRight ticks:RandomBetween(90, 210) loops:0];
-        else if (roll < 96) [self setMode:PetModeWalkLeft ticks:RandomBetween(90, 210) loops:0];
-        else [self triggerWave];
+    // Every active action is followed by an idle window. Cursor hunting only
+    // runs while idle, so autonomous actions cannot starve interaction.
+    if (_mode != PetModeIdle) {
+        [self startTimedIdle];
         return;
     }
-    if (roll < 50) [self setMode:PetModeIdle ticks:RandomBetween(144, 360) loops:0];
-    else if (roll < 73) [self setMode:PetModeWalkRight ticks:RandomBetween(90, 210) loops:0];
-    else if (roll < 96) [self setMode:PetModeWalkLeft ticks:RandomBetween(90, 210) loops:0];
-    else [self triggerWave];
+
+    NSInteger roll = RandomBetween(0, 99);
+    if (roll < 25) [self startTimedIdle];
+    else if (roll < 45) [self setMode:PetModeWalkRight ticks:RandomBetween(72, 120) loops:0];
+    else if (roll < 65) [self setMode:PetModeWalkLeft ticks:RandomBetween(72, 120) loops:0];
+    else if (roll < 80) [self startWave];
+    else if (roll < 90) [self startJump];
+    else [self startHissWithLoops:2];
+}
+
+- (void)startTimedIdle {
+    NSInteger ticks = _activityLevel == PetActivityLevelLively
+        ? RandomBetween(36, 72)
+        : RandomBetween(72, 144);
+    [self setMode:PetModeIdle ticks:ticks loops:0];
 }
 
 - (void)setMode:(PetMode)newMode ticks:(NSInteger)ticks loops:(NSInteger)loops {
@@ -1697,9 +1726,9 @@ static void ShowHelpWindow(void) {
 
     _activityMenu = [[NSMenu alloc] initWithTitle:@"活动性"];
     NSArray *activityOptions = @[
-        @[@"默认（约 65% 待机）", @(PetActivityLevelDefault)],
-        @[@"活泼（约 35% 待机）", @(PetActivityLevelLively)],
-        @[@"安静（始终待机）", @(PetActivityLevelQuiet)]
+        @[@"默认", @(PetActivityLevelDefault)],
+        @[@"活泼", @(PetActivityLevelLively)],
+        @[@"安静（不主动活动）", @(PetActivityLevelQuiet)]
     ];
     for (NSArray *option in activityOptions) {
         NSMenuItem *activityItem = [self item:option[0] action:@selector(changeActivity:) key:@""];

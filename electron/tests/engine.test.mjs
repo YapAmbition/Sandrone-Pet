@@ -56,6 +56,29 @@ test('quiet activity remains idle', () => {
   assert.equal(engine.phaseTicks, Number.MAX_SAFE_INTEGER);
 });
 
+test('walking is always followed by a timed idle window', () => {
+  const { engine } = fixture();
+  engine.setMode('walkRight', 1, 0);
+  engine.tick();
+  assert.equal(engine.mode, 'idle');
+  assert.ok(engine.phaseTicks >= 72 && engine.phaseTicks <= 144);
+});
+
+test('transient actions are always followed by a timed idle window', () => {
+  const { engine } = fixture();
+  engine.triggerWave();
+  for (let index = 0; index < 24; index += 1) engine.tick();
+  assert.equal(engine.mode, 'idle');
+  assert.ok(engine.phaseTicks >= 72 && engine.phaseTicks <= 144);
+});
+
+test('leaving quiet mode resumes autonomous activity scheduling', () => {
+  const { engine } = fixture();
+  engine.applySettings({ activityLevel: 'quiet' });
+  engine.applySettings({ activityLevel: 'default' });
+  assert.notEqual(engine.phaseTicks, Number.MAX_SAFE_INTEGER);
+});
+
 test('walking pet turns around when macOS rejects movement into a reserved area', () => {
   const { engine } = fixture();
   engine.setMode('walkLeft', 120, 0);
@@ -76,6 +99,16 @@ test('walking pet turns around when macOS rejects movement into a reserved area'
   });
 
   assert.equal(engine.mode, 'walkRight');
+  assert.equal(engine.phaseTicks, 120);
+});
+
+test('screen-edge turns preserve the remaining walking time', () => {
+  const { engine } = fixture();
+  engine.setMode('walkRight', 100, 0);
+  engine.environment.bounds.x = 1056;
+  engine.moveHorizontally();
+  assert.equal(engine.mode, 'walkLeft');
+  assert.equal(engine.phaseTicks, 100);
 });
 
 test('large system correction updates the hiss anchor instead of fighting it', () => {

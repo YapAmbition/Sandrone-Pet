@@ -11,6 +11,9 @@ const SMOKE_TEST = process.env.HISSY_SMOKE_TEST === '1';
 
 const CELL_WIDTH = 192;
 const CELL_HEIGHT = 208;
+const STANDARD_SCALE = 0.75;
+const SPEECH_WIDTH = 190;
+const SPEECH_HEIGHT = 68;
 const MIN_SCALE = 0.5625;
 const MAX_SCALE = 1.125;
 const DEFAULTS = {
@@ -126,6 +129,14 @@ function positionSpeechBubble() {
   speechWindow.setPosition(x, y, false);
 }
 
+function resizeSpeechBubble() {
+  if (!speechWindow || speechWindow.isDestroyed()) return;
+  const factor = validScale(store.get('scale')) / STANDARD_SCALE;
+  speechWindow.setSize(Math.round(SPEECH_WIDTH * factor), Math.round(SPEECH_HEIGHT * factor), false);
+  speechWindow.webContents.setZoomFactor(factor);
+  positionSpeechBubble();
+}
+
 function sendToPet(channel, value) {
   if (petWindow && !petWindow.isDestroyed() && !petWindow.webContents.isLoading()) {
     petWindow.webContents.send(channel, value);
@@ -135,9 +146,10 @@ function sendToPet(channel, value) {
 function command(type, value) { sendToPet('pet:command', { type, value }); }
 
 function createSpeechWindow() {
+  const factor = validScale(store.get('scale')) / STANDARD_SCALE;
   speechWindow = new BrowserWindow({
-    width: 190,
-    height: 68,
+    width: Math.round(SPEECH_WIDTH * factor),
+    height: Math.round(SPEECH_HEIGHT * factor),
     frame: false,
     transparent: true,
     resizable: false,
@@ -151,7 +163,8 @@ function createSpeechWindow() {
       preload: preloadFile('speech-preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      zoomFactor: factor
     }
   });
   speechWindow.setIgnoreMouseEvents(true);
@@ -219,9 +232,9 @@ function resizePet(scale) {
     ...size
   });
   petWindow.setBounds(next, false);
+  resizeSpeechBubble();
   savePosition();
   command('settings', settingsSnapshot());
-  positionSpeechBubble();
 }
 
 function resetPosition() {
@@ -288,9 +301,9 @@ function visibilitySubmenu(settings) {
 
 function activitySubmenu(settings) {
   return [
-    { label: '默认（约 65% 待机）', type: 'radio', checked: check(settings.activityLevel, 'default'), click: () => setSetting('activityLevel', 'default') },
-    { label: '活泼（约 35% 待机）', type: 'radio', checked: check(settings.activityLevel, 'lively'), click: () => setSetting('activityLevel', 'lively') },
-    { label: '安静（始终待机）', type: 'radio', checked: check(settings.activityLevel, 'quiet'), click: () => setSetting('activityLevel', 'quiet') }
+    { label: '默认', type: 'radio', checked: check(settings.activityLevel, 'default'), click: () => setSetting('activityLevel', 'default') },
+    { label: '活泼', type: 'radio', checked: check(settings.activityLevel, 'lively'), click: () => setSetting('activityLevel', 'lively') },
+    { label: '安静（不主动活动）', type: 'radio', checked: check(settings.activityLevel, 'quiet'), click: () => setSetting('activityLevel', 'quiet') }
   ];
 }
 
