@@ -21,7 +21,11 @@ class PetStats {
     this.data = {
       dayKey: stored.dayKey || localDayKey(),
       today: { ...EMPTY_METRICS, ...(stored.today || {}) },
-      total: { ...EMPTY_METRICS, ...(stored.total || {}) }
+      total: { ...EMPTY_METRICS, ...(stored.total || {}) },
+      gifts: {
+        counts: { ...(stored.gifts?.counts || {}) },
+        firstFound: { ...(stored.gifts?.firstFound || {}) }
+      }
     };
     this.pendingCompanionSeconds = 0;
     this.ensureCurrentDay();
@@ -48,6 +52,16 @@ class PetStats {
     }
   }
 
+  recordGift(identifier, date = new Date()) {
+    if (typeof identifier !== 'string' || !identifier) return;
+    const counts = this.data.gifts.counts;
+    counts[identifier] = Math.max(0, Number(counts[identifier]) || 0) + 1;
+    if (!this.data.gifts.firstFound[identifier]) {
+      this.data.gifts.firstFound[identifier] = date.toISOString();
+    }
+    this.save();
+  }
+
   snapshot() {
     this.ensureCurrentDay();
     return structuredClone(this.data);
@@ -57,7 +71,8 @@ class PetStats {
     this.data = {
       dayKey: localDayKey(),
       today: { ...EMPTY_METRICS },
-      total: { ...EMPTY_METRICS }
+      total: { ...EMPTY_METRICS },
+      gifts: { counts: {}, firstFound: {} }
     };
     this.pendingCompanionSeconds = 0;
     this.save();

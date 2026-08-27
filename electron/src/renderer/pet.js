@@ -60,6 +60,7 @@ const engine = new PetEngine({
   speech: (text, duration) => window.petAPI.showSpeech(text, duration),
   hideSpeech: () => window.petAPI.hideSpeech(),
   record: (metric) => window.petAPI.record(metric),
+  gift: (presentation) => window.petAPI.gift(presentation),
   savePosition: () => window.petAPI.savePosition(),
   publish: (state) => window.petAPI.publishState(state)
 });
@@ -118,6 +119,7 @@ window.petAPI.onEnvironment((environment) => engine.updateEnvironment(environmen
 window.petAPI.onMoveResult((result) => engine.confirmMove(result));
 window.petAPI.onCommand((command) => {
   if (command.type === 'action') engine.trigger(command.value);
+  else if (command.type === 'giftTap') engine.giftTapped();
   else if (command.type === 'settings') engine.applySettings(command.value);
   else if (command.type === 'visibility') engine.updateEnvironment({ visible: command.value });
   else if (command.type === 'interaction') engine.noteInteraction();

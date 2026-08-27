@@ -30,3 +30,23 @@ test('reset clears both today and cumulative metrics', () => {
   assert.equal(stats.snapshot().today.hisses, 0);
   assert.equal(stats.snapshot().total.caught, 0);
 });
+
+test('gift counts and first discovery date are persisted', () => {
+  const store = new MemoryStore();
+  const stats = new PetStats(store);
+  const discovered = new Date('2026-08-27T12:00:00.000Z');
+  stats.recordGift('screw', discovered);
+  stats.recordGift('screw', new Date('2026-08-28T12:00:00.000Z'));
+  const snapshot = stats.snapshot();
+  assert.equal(snapshot.gifts.counts.screw, 2);
+  assert.equal(snapshot.gifts.firstFound.screw, discovered.toISOString());
+  assert.equal(store.data.stats.gifts.counts.screw, 2);
+});
+
+test('reset also clears the gift box', () => {
+  const store = new MemoryStore();
+  const stats = new PetStats(store);
+  stats.recordGift('ruby');
+  stats.reset();
+  assert.deepEqual(stats.snapshot().gifts, { counts: {}, firstFound: {} });
+});

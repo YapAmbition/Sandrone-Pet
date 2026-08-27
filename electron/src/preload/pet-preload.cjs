@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('petAPI', {
   record: (metric) => ipcRenderer.send('stats:record', metric),
   showSpeech: (text, duration) => ipcRenderer.send('speech:show', { text, duration }),
   hideSpeech: () => ipcRenderer.send('speech:hide'),
+  gift: (presentation) => ipcRenderer.send('gift:presentation', presentation),
   showContextMenu: () => ipcRenderer.send('menu:context'),
   savePosition: () => ipcRenderer.send('pet:save-position'),
   publishState: (state) => ipcRenderer.send('pet:state', state),

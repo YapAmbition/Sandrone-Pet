@@ -52,6 +52,7 @@ export class PetEngine {
       speech: hooks.speech || (() => {}),
       hideSpeech: hooks.hideSpeech || (() => {}),
       record: hooks.record || (() => {}),
+      gift: hooks.gift || (() => {}),
       savePosition: hooks.savePosition || (() => {}),
       publish: hooks.publish || (() => {})
     };
@@ -105,13 +106,19 @@ export class PetEngine {
     this.pendingMove = null;
     this.blockedMoveTicks = 0;
     this.acceptedMoveTicks = 0;
+    this.giftDefinitions = [];
+    this.giftActive = false;
+    this.giftTick = 0;
+    this.giftReactionTicks = 0;
+    this.giftCooldownTicks = 24 * 8;
   }
 
-  initialize({ settings, bounds, workArea }) {
+  initialize({ settings, bounds, workArea, gifts = [] }) {
     this.settings = { ...this.settings, ...settings };
     this.environment.bounds = { ...bounds };
     this.environment.workArea = { ...workArea };
     this.jumpBaseY = bounds.y;
+    this.giftDefinitions = gifts.map((gift) => ({ ...gift }));
     const staysIdle = this.settings.paused || this.settings.activityLevel === 'quiet';
     this.setMode('idle', staysIdle ? Number.MAX_SAFE_INTEGER : 80, 0);
   }
@@ -122,6 +129,7 @@ export class PetEngine {
     this.settings = { ...this.settings, ...settings };
     if (settings.cursorHuntEnabled === false) this.cancelHunt();
     if (!previousPaused && this.settings.paused) {
+      this.cancelGiftPresentation();
       this.cancelHunt();
       this.setMode('idle', Number.MAX_SAFE_INTEGER, 0);
     } else if (previousPaused && !this.settings.paused) {
@@ -194,10 +202,12 @@ export class PetEngine {
     else if (action === 'jump') this.triggerJump();
     else if (action === 'hiss') this.triggerHiss();
     else if (action === 'toggleSleep') this.toggleSleep();
+    else if (action === 'gift') this.triggerGiftDiscovery();
   }
 
   triggerWave() {
     this.noteInteraction();
+    this.cancelGiftPresentation();
     this.startWave();
   }
 
@@ -208,6 +218,7 @@ export class PetEngine {
 
   triggerProud() {
     this.noteInteraction();
+    this.cancelGiftPresentation();
     this.startProud();
   }
 
@@ -219,6 +230,7 @@ export class PetEngine {
 
   triggerJump() {
     this.noteInteraction();
+    this.cancelGiftPresentation();
     this.startJump();
   }
 
@@ -236,6 +248,7 @@ export class PetEngine {
 
   triggerHiss() {
     this.noteInteraction();
+    this.cancelGiftPresentation();
     this.startHiss(2);
   }
 
@@ -339,9 +352,15 @@ export class PetEngine {
     }
     if (this.dragging) return this.tickDrag();
     if (this.dropping) return this.tickDrop();
+    if (this.giftCooldownTicks > 0) this.giftCooldownTicks -= 1;
     if (this.huntCooldownTicks > 0) this.huntCooldownTicks -= 1;
     this.updateAutomaticSleep();
     if (this.sleeping) return this.tickSleeping();
+    if (!this.giftActive && this.giftCooldownTicks <= 0 && !this.settings.paused &&
+        this.settings.activityLevel !== 'quiet' && this.mode === 'idle' && Math.floor(Math.random() * 360) === 0) {
+      this.startGiftDiscovery(this.randomGift());
+    }
+    if (this.giftActive) return this.tickGift();
     this.updateMouseHunt();
     if (this.huntAnticipationTicks > 0) return this.tickHuntAnticipation();
     if (this.mode === 'walkRight' || this.mode === 'walkLeft') this.moveHorizontally();
@@ -383,6 +402,7 @@ export class PetEngine {
   beginDrag() {
     if (!this.pointerHeld || this.dragging) return;
     this.cancelHunt();
+    this.cancelGiftPresentation();
     this.setMode('idle', 80, 0);
     this.sleeping = false;
     this.sleepRequested = false;
@@ -425,6 +445,70 @@ export class PetEngine {
     if (progress < 1) return;
     this.dropping = false;
     this.startHiss(2);
+  }
+
+  randomGift() {
+    if (!this.giftDefinitions.length) return null;
+    const totalWeight = this.giftDefinitions.reduce((sum, gift) => sum + Math.max(0, Number(gift.weight) || 0), 0);
+    if (totalWeight <= 0) return this.giftDefinitions[0];
+    let roll = Math.random() * totalWeight;
+    for (const gift of this.giftDefinitions) {
+      roll -= Math.max(0, Number(gift.weight) || 0);
+      if (roll < 0) return gift;
+    }
+    return this.giftDefinitions[0];
+  }
+
+  triggerGiftDiscovery() {
+    this.noteInteraction();
+    this.startGiftDiscovery(this.randomGift());
+  }
+
+  startGiftDiscovery(gift) {
+    if (!gift || this.dragging || this.dropping) return;
+    this.cancelHunt();
+    if (this.sleeping) this.wakeFromSleep();
+    this.cancelGiftPresentation();
+    this.setMode('review', Number.MAX_SAFE_INTEGER, 0);
+    this.giftActive = true;
+    this.giftTick = 0;
+    this.giftReactionTicks = 0;
+    this.giftCooldownTicks = 24 * 240;
+    this.hooks.gift({ type: 'show', gift });
+    this.hooks.speech('多涅？', 1100);
+  }
+
+  giftTapped() {
+    if (!this.giftActive) return;
+    this.noteInteraction();
+    this.hooks.record('interactions');
+    this.giftReactionTicks = 32;
+    this.hooks.gift({ type: 'reaction' });
+    this.hooks.speech('多涅！💢', 1700);
+  }
+
+  cancelGiftPresentation() {
+    if (!this.giftActive) return;
+    this.giftActive = false;
+    this.giftTick = 0;
+    this.giftReactionTicks = 0;
+    this.hooks.gift({ type: 'hide' });
+  }
+
+  tickGift() {
+    this.giftTick += 1;
+    if (this.giftReactionTicks > 0) {
+      this.giftReactionTicks -= 1;
+      this.hooks.render({ kind: 'sheet', row: ROWS.hissing, column: Math.floor(this.giftTick / 3) % 8 });
+    } else if (this.giftTick < 27) {
+      this.hooks.render({ kind: 'sheet', row: ROWS.review, column: Math.floor(this.giftTick / 5) % 6 });
+    } else {
+      this.hooks.render({ kind: 'proud', column: Math.floor(this.giftTick / 5) % 6 });
+      if (this.giftTick === 27) this.hooks.speech('多涅。🎁', 2000);
+    }
+    if (this.giftTick < 144) return;
+    this.cancelGiftPresentation();
+    this.startTimedIdle();
   }
 
   updateAutomaticSleep() {

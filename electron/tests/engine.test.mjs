@@ -4,11 +4,12 @@ import { PetEngine } from '../src/renderer/engine.mjs';
 
 function fixture() {
   let now = 0;
-  const events = { frames: [], moves: [], records: [], speeches: [], states: [], speechHides: 0 };
+  const events = { frames: [], moves: [], records: [], speeches: [], gifts: [], states: [], speechHides: 0 };
   const engine = new PetEngine({
     render: (value) => events.frames.push(value),
     moveTo: (x, y) => events.moves.push({ x, y }),
     record: (value) => events.records.push(value),
+    gift: (value) => events.gifts.push(value),
     speech: (text) => events.speeches.push(text),
     hideSpeech: () => { events.speechHides += 1; },
     publish: (state) => events.states.push(state)
@@ -16,7 +17,8 @@ function fixture() {
   engine.initialize({
     settings: { scale: 0.75, activityLevel: 'default', cursorHuntEnabled: true, paused: false },
     bounds: { x: 800, y: 600, width: 144, height: 156 },
-    workArea: { x: 0, y: 0, width: 1200, height: 800 }
+    workArea: { x: 0, y: 0, width: 1200, height: 800 },
+    gifts: [{ id: 'screw', weight: 100 }]
   });
   return { engine, events, advance: (milliseconds) => { now += milliseconds; } };
 }
@@ -104,6 +106,39 @@ test('automatic sleep begins after one minute of inactivity', () => {
   assert.equal(engine.sleeping, true);
   assert.equal(engine.mode, 'sleeping');
   assert.ok(events.records.includes('sleeps'));
+});
+
+test('manual gift discovery shows, reacts, and returns to idle', () => {
+  const { engine, events } = fixture();
+  engine.triggerGiftDiscovery();
+  assert.equal(engine.giftActive, true);
+  assert.equal(engine.mode, 'review');
+  assert.deepEqual(events.gifts.at(-1), { type: 'show', gift: { id: 'screw', weight: 100 } });
+  assert.equal(events.speeches.at(-1), '多涅？');
+
+  for (let index = 0; index < 27; index += 1) engine.tick();
+  assert.equal(events.speeches.at(-1), '多涅。🎁');
+  engine.giftTapped();
+  assert.equal(events.records.at(-1), 'interactions');
+  assert.equal(events.gifts.at(-1).type, 'reaction');
+  assert.equal(events.speeches.at(-1), '多涅！💢');
+
+  for (let index = 27; index < 144; index += 1) engine.tick();
+  assert.equal(engine.giftActive, false);
+  assert.equal(events.gifts.at(-1).type, 'hide');
+  assert.equal(engine.mode, 'idle');
+});
+
+test('sleeping pet does not discover gifts until manually woken', () => {
+  const { engine, events } = fixture();
+  engine.startSleeping();
+  engine.giftCooldownTicks = 0;
+  for (let index = 0; index < 500; index += 1) engine.tick();
+  assert.equal(engine.giftActive, false);
+  assert.equal(events.gifts.length, 0);
+  engine.triggerGiftDiscovery();
+  assert.equal(engine.sleeping, false);
+  assert.equal(engine.giftActive, true);
 });
 
 test('manual jump uses a scale-aware parabolic lift and lands', () => {

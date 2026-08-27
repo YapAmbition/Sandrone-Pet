@@ -7,6 +7,7 @@ const { JsonStore } = require('./store.cjs');
 const { PetStats } = require('./stats.cjs');
 const { MovementAreaTracker } = require('./movement-area.cjs');
 const { windowsLaunchExecutable } = require('./windows-paths.cjs');
+const { GIFTS } = require('./gifts.cjs');
 const SMOKE_TEST = process.env.HISSY_SMOKE_TEST === '1';
 
 const CELL_WIDTH = 192;
@@ -25,22 +26,26 @@ const DEFAULTS = {
   clickThrough: false,
   launchAtLogin: false,
   position: null,
-  stats: null
+  stats: null,
+  seenGiftCount: 0
 };
 
 let store;
 let stats;
 let petWindow;
 let speechWindow;
+let giftWindow;
 let statsWindow;
 let helpWindow;
 let tray;
 let speechTimer;
+let activeGift = null;
 let environmentTimer;
 let companionTimer;
 let fullscreenHelper;
 let fullscreenDetected = false;
 let latestPetState = { sleeping: false, mode: 'idle' };
+const smokeReady = new Set();
 let rebuildTrayMenu = () => {};
 const movementAreas = new MovementAreaTracker();
 
@@ -129,12 +134,37 @@ function positionSpeechBubble() {
   speechWindow.setPosition(x, y, false);
 }
 
+function positionGiftWindow() {
+  if (!petWindow || !giftWindow || petWindow.isDestroyed() || giftWindow.isDestroyed()) return;
+  const pet = petWindow.getBounds();
+  const gift = giftWindow.getBounds();
+  const area = movementAreas.areaFor(screen.getDisplayMatching(pet));
+  const factor = validScale(store.get('scale')) / STANDARD_SCALE;
+  const gap = Math.round(3.5 * factor);
+  const rightX = pet.x + pet.width + gap;
+  const leftX = pet.x - gift.width - gap;
+  let x = rightX + gift.width <= area.x + area.width - 4 ? rightX : leftX;
+  x = Math.max(area.x + 4, Math.min(x, area.x + area.width - gift.width - 4));
+  let y = Math.round(pet.y + (pet.height - gift.height) * 0.42);
+  y = Math.max(area.y + 4, Math.min(y, area.y + area.height - gift.height - 4));
+  giftWindow.setPosition(x, y, false);
+}
+
 function resizeSpeechBubble() {
   if (!speechWindow || speechWindow.isDestroyed()) return;
   const factor = validScale(store.get('scale')) / STANDARD_SCALE;
   speechWindow.setSize(Math.round(SPEECH_WIDTH * factor), Math.round(SPEECH_HEIGHT * factor), false);
   speechWindow.webContents.setZoomFactor(factor);
   positionSpeechBubble();
+}
+
+function resizeGiftWindow() {
+  if (!giftWindow || giftWindow.isDestroyed()) return;
+  const factor = validScale(store.get('scale')) / STANDARD_SCALE;
+  const side = Math.round(70 * factor);
+  giftWindow.setSize(side, side, false);
+  giftWindow.webContents.setZoomFactor(factor);
+  positionGiftWindow();
 }
 
 function sendToPet(channel, value) {
@@ -171,6 +201,76 @@ function createSpeechWindow() {
   speechWindow.setAlwaysOnTop(true, 'pop-up-menu');
   speechWindow.loadFile(rendererFile('speech.html'));
   speechWindow.on('closed', () => { speechWindow = null; });
+}
+
+function createGiftWindow() {
+  const factor = validScale(store.get('scale')) / STANDARD_SCALE;
+  const side = Math.round(70 * factor);
+  giftWindow = new BrowserWindow({
+    width: side,
+    height: side,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    show: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    webPreferences: {
+      preload: preloadFile('gift-preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      zoomFactor: factor
+    }
+  });
+  giftWindow.setMenuBarVisibility(false);
+  giftWindow.setAlwaysOnTop(true, 'pop-up-menu');
+  giftWindow.loadFile(rendererFile('gift.html'));
+  giftWindow.on('closed', () => { giftWindow = null; activeGift = null; });
+}
+
+function sendGiftPresentation(presentation) {
+  if (!giftWindow || giftWindow.isDestroyed()) return;
+  const deliver = () => {
+    if (giftWindow && !giftWindow.isDestroyed()) giftWindow.webContents.send('gift:presentation', presentation);
+  };
+  if (giftWindow.webContents.isLoading()) giftWindow.webContents.once('did-finish-load', deliver);
+  else deliver();
+}
+
+function showActiveGiftWindow() {
+  if (!activeGift || !giftWindow || giftWindow.isDestroyed()) return;
+  positionGiftWindow();
+  sendGiftPresentation({
+    type: 'show',
+    name: activeGift.name,
+    imageUrl: assetUrl(`Gifts/${activeGift.asset}`)
+  });
+  giftWindow.showInactive();
+}
+
+function handleGiftPresentation(presentation) {
+  if (presentation?.type === 'show') {
+    const gift = GIFTS.find((item) => item.id === presentation.gift?.id);
+    if (!gift) return;
+    activeGift = gift;
+    stats.recordGift(gift.id);
+    statsWindow?.webContents.send('stats:changed');
+    resizeGiftWindow();
+    positionGiftWindow();
+    if (petWindow?.isVisible()) showActiveGiftWindow();
+    return;
+  }
+  if (presentation?.type === 'reaction' && activeGift) {
+    sendGiftPresentation({ type: 'reaction' });
+    return;
+  }
+  activeGift = null;
+  sendGiftPresentation({ type: 'hide' });
+  giftWindow?.hide();
 }
 
 function showSpeech(text, duration) {
@@ -218,6 +318,7 @@ function createPetWindow() {
     if (!SMOKE_TEST) applyVisibility();
   });
   petWindow.on('move', positionSpeechBubble);
+  petWindow.on('move', positionGiftWindow);
   petWindow.on('closed', () => { petWindow = null; });
 }
 
@@ -233,6 +334,7 @@ function resizePet(scale) {
   });
   petWindow.setBounds(next, false);
   resizeSpeechBubble();
+  resizeGiftWindow();
   savePosition();
   command('settings', settingsSnapshot());
 }
@@ -282,8 +384,12 @@ function applyVisibility() {
   const shouldShow = mode === 'always' || (mode === 'fullscreen' && !fullscreenDetected);
   if (shouldShow) {
     petWindow.showInactive();
+    if (activeGift) {
+      showActiveGiftWindow();
+    }
   } else {
     hideSpeech();
+    giftWindow?.hide();
     petWindow.hide();
   }
   command('visibility', shouldShow);
@@ -312,6 +418,7 @@ function petContextMenuTemplate() {
   return [
     { label: '得意一下', click: () => command('action', 'proud') },
     { label: '哈气！', click: () => command('action', 'hiss') },
+    { label: '让她找找看', click: () => command('action', 'gift') },
     { label: latestPetState.sleeping ? '叫醒她' : '让她睡觉', click: () => command('action', 'toggleSleep') },
     { label: '回到屏幕右下角', click: resetPosition },
     { label: '宠物显示', submenu: visibilitySubmenu(settings) },
@@ -330,6 +437,7 @@ function commonMenuTemplate(includeQuit = true) {
     { label: '得意一下', click: () => command('action', 'proud') },
     { label: '跳一下', click: () => command('action', 'jump') },
     { label: '哈气！', click: () => command('action', 'hiss') },
+    { label: '让她找找看', click: () => command('action', 'gift') },
     { label: latestPetState.sleeping ? '叫醒她' : '让她睡觉', click: () => command('action', 'toggleSleep') },
     { label: '多涅小记…', click: showStatsWindow },
     { type: 'separator' },
@@ -427,6 +535,7 @@ function startEnvironmentFeed() {
       workArea: movementAreas.areaFor(display),
       visible: petWindow.isVisible()
     });
+    if (activeGift) positionGiftWindow();
   }, 42);
   companionTimer = setInterval(() => {
     if (petWindow?.isVisible()) {
@@ -473,6 +582,14 @@ function startFullscreenMonitor() {
 }
 
 function registerIpc() {
+  const markSmokeReady = (name) => {
+    if (!SMOKE_TEST) return;
+    smokeReady.add(name);
+    if (smokeReady.has('pet') && smokeReady.has('gift') && smokeReady.has('stats')) {
+      console.log('Electron pet, gift, and stats renderers smoke test passed.');
+      app.exit(0);
+    }
+  };
   ipcMain.handle('pet:ready', () => ({
     assets: {
       spritesheet: assetUrl('spritesheet.png'),
@@ -481,16 +598,17 @@ function registerIpc() {
       drag: ['lift-1.png', 'lift-2.png', 'lift-3.png', 'lift-4.png', 'held.png']
         .map((name) => assetUrl(`Drag/${name}`))
     },
+    gifts: GIFTS.map((gift) => ({ id: gift.id, weight: gift.weight })),
     settings: settingsSnapshot(),
     platform: process.platform,
     bounds: petWindow.getBounds(),
     workArea: movementAreas.areaFor(screen.getDisplayMatching(petWindow.getBounds()))
   }));
   ipcMain.on('pet:renderer-ready', () => {
-    if (!SMOKE_TEST) return;
-    console.log('Electron pet renderer smoke test passed.');
-    app.exit(0);
+    markSmokeReady('pet');
   });
+  ipcMain.on('gift:renderer-ready', () => markSmokeReady('gift'));
+  ipcMain.on('stats:renderer-ready', () => markSmokeReady('stats'));
   ipcMain.on('pet:move-to', (_event, point) => {
     if (!petWindow || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return;
     const current = petWindow.getBounds();
@@ -509,12 +627,26 @@ function registerIpc() {
   });
   ipcMain.on('speech:show', (_event, payload) => showSpeech(payload?.text, payload?.duration));
   ipcMain.on('speech:hide', hideSpeech);
+  ipcMain.on('gift:presentation', (_event, presentation) => handleGiftPresentation(presentation));
+  ipcMain.on('gift:tapped', () => command('giftTap'));
   ipcMain.on('menu:context', () => Menu.buildFromTemplate(petContextMenuTemplate()).popup({ window: petWindow }));
   ipcMain.on('stats:record', (_event, metric) => {
     stats.add(metric, 1);
     statsWindow?.webContents.send('stats:changed');
   });
-  ipcMain.handle('stats:snapshot', () => stats.snapshot());
+  ipcMain.handle('stats:snapshot', () => ({
+    ...stats.snapshot(),
+    giftDefinitions: GIFTS.map((gift) => ({
+      ...gift,
+      imageUrl: assetUrl(`Gifts/${gift.asset}`)
+    })),
+    seenGiftCount: Number(store.get('seenGiftCount')) || 0
+  }));
+  ipcMain.on('stats:mark-gifts-seen', () => {
+    const snapshot = stats.snapshot();
+    const total = Object.values(snapshot.gifts.counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
+    store.set('seenGiftCount', total);
+  });
   ipcMain.handle('stats:reset', async () => {
     const result = await dialog.showMessageBox(statsWindow, {
       type: 'warning',
@@ -522,10 +654,11 @@ function registerIpc() {
       defaultId: 0,
       cancelId: 0,
       message: '要清空多涅小记吗？',
-      detail: '今天和累计的所有记录都会清零，此操作无法撤销。'
+      detail: '今天、累计记录和小箱子收藏都会清空，此操作无法撤销。'
     });
     if (result.response !== 1) return false;
     stats.reset();
+    store.set('seenGiftCount', 0);
     return true;
   });
 }
@@ -547,10 +680,12 @@ app.whenReady().then(() => {
   screen.on('display-removed', (_event, display) => movementAreas.remove(display.id));
   registerIpc();
   createSpeechWindow();
+  createGiftWindow();
   createPetWindow();
   if (SMOKE_TEST) {
+    showStatsWindow();
     setTimeout(() => {
-      console.error('Electron pet renderer smoke test timed out.');
+      console.error('Electron pet, gift, or stats renderer smoke test timed out.');
       app.exit(1);
     }, 12_000).unref();
   } else {
@@ -568,5 +703,6 @@ app.on('before-quit', () => {
   clearInterval(environmentTimer);
   clearInterval(companionTimer);
   clearTimeout(speechTimer);
+  giftWindow?.close();
   fullscreenHelper?.kill();
 });
