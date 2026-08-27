@@ -35,6 +35,9 @@ static const CGFloat kMaximumPetScale = 1.125;
 static const CGFloat kSpeechBubbleWidth = 132.0;
 static const CGFloat kSpeechBubbleHeight = 62.0;
 static const NSTimeInterval kAutomaticSleepDelay = 60.0;
+static const NSTimeInterval kDragLongPressDelay = 0.25;
+static const NSInteger kDragLiftTicks = 7;
+static const NSInteger kDragDropTicks = 8;
 
 static NSInteger RowForMode(PetMode mode) { return mode == PetModeProud ? 6 : (NSInteger)mode; }
 
@@ -520,6 +523,7 @@ static void ShowHelpWindow(void) {
 - (NSImage *)frameAtRow:(NSInteger)row column:(NSInteger)column;
 - (NSImage *)proudFrameAtColumn:(NSInteger)column;
 - (NSImage *)sleepFrameAtColumn:(NSInteger)column;
+- (NSImage *)dragFrameAtColumn:(NSInteger)column;
 @end
 
 @implementation SpriteAtlas {
@@ -527,6 +531,7 @@ static void ShowHelpWindow(void) {
     NSMutableDictionary<NSString *, NSImage *> *_cache;
     NSArray<NSImage *> *_proudFrames;
     NSArray<NSImage *> *_sleepFrames;
+    NSArray<NSImage *> *_dragFrames;
 }
 
 - (instancetype)initWithBundle:(NSBundle *)bundle {
@@ -554,6 +559,15 @@ static void ShowHelpWindow(void) {
         [sleepFrames addObject:frame];
     }
     _sleepFrames = sleepFrames.copy;
+    NSArray<NSString *> *dragNames = @[@"lift-1", @"lift-2", @"lift-3", @"lift-4", @"held"];
+    NSMutableArray<NSImage *> *dragFrames = [NSMutableArray arrayWithCapacity:dragNames.count];
+    for (NSString *name in dragNames) {
+        NSURL *frameURL = [bundle URLForResource:name withExtension:@"png" subdirectory:@"Drag"];
+        NSImage *frame = frameURL ? [[NSImage alloc] initWithContentsOfURL:frameURL] : nil;
+        if (!frame) return nil;
+        [dragFrames addObject:frame];
+    }
+    _dragFrames = dragFrames.copy;
     return self;
 }
 
@@ -586,6 +600,10 @@ static void ShowHelpWindow(void) {
 - (NSImage *)sleepFrameAtColumn:(NSInteger)column {
     if (column < 0 || column >= (NSInteger)_sleepFrames.count) return nil;
     return _sleepFrames[column];
+}
+- (NSImage *)dragFrameAtColumn:(NSInteger)column {
+    if (column < 0 || column >= (NSInteger)_dragFrames.count) return nil;
+    return _dragFrames[column];
 }
 @end
 
@@ -650,6 +668,10 @@ static void ShowHelpWindow(void) {
 @interface PetView : NSView
 @property(nonatomic, strong) NSImage *currentFrame;
 @property(nonatomic, weak) PetController *controller;
+@property(nonatomic) CGFloat visualScaleX;
+@property(nonatomic) CGFloat visualScaleY;
+@property(nonatomic) CGFloat visualYOffset;
+@property(nonatomic) CGFloat visualRotation;
 @end
 
 @interface PetController : NSObject
@@ -684,10 +706,7 @@ static void ShowHelpWindow(void) {
 - (void)petMouseUpWithClickCount:(NSInteger)clickCount;
 @end
 
-@implementation PetView {
-    NSPoint _mouseDownLocation;
-    BOOL _didDrag;
-}
+@implementation PetView
 
 - (BOOL)isFlipped { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
@@ -698,27 +717,31 @@ static void ShowHelpWindow(void) {
 - (void)drawRect:(NSRect)dirtyRect {
     [super drawRect:dirtyRect];
     if (!_currentFrame) return;
+    CGFloat scaleX = self.visualScaleX > 0.0 ? self.visualScaleX : 1.0;
+    CGFloat scaleY = self.visualScaleY > 0.0 ? self.visualScaleY : 1.0;
+    [NSGraphicsContext saveGraphicsState];
+    NSAffineTransform *transform = [NSAffineTransform transform];
+    [transform translateXBy:NSMidX(self.bounds) yBy:NSMidY(self.bounds) + self.visualYOffset];
+    [transform rotateByRadians:self.visualRotation];
+    [transform scaleXBy:scaleX yBy:scaleY];
+    [transform translateXBy:-NSMidX(self.bounds) yBy:-NSMidY(self.bounds)];
+    [transform concat];
     [_currentFrame drawInRect:self.bounds
                      fromRect:NSZeroRect
                     operation:NSCompositingOperationSourceOver
                      fraction:1.0
                respectFlipped:YES
                         hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
+    [NSGraphicsContext restoreGraphicsState];
 }
 - (void)mouseDown:(NSEvent *)event {
-    _mouseDownLocation = NSEvent.mouseLocation;
-    _didDrag = NO;
-    [self.controller petMouseDownAt:_mouseDownLocation];
+    [self.controller petMouseDownAt:NSEvent.mouseLocation];
 }
 - (void)mouseDragged:(NSEvent *)event {
-    NSPoint location = NSEvent.mouseLocation;
-    if (hypot(location.x - _mouseDownLocation.x, location.y - _mouseDownLocation.y) > 3.0) {
-        _didDrag = YES;
-    }
-    [self.controller petMouseDraggedTo:location];
+    [self.controller petMouseDraggedTo:NSEvent.mouseLocation];
 }
 - (void)mouseUp:(NSEvent *)event {
-    [self.controller petMouseUpWithClickCount:_didDrag ? 0 : event.clickCount];
+    [self.controller petMouseUpWithClickCount:event.clickCount];
 }
 - (void)rightMouseDown:(NSEvent *)event {
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"哈气桑多涅"];
@@ -817,6 +840,12 @@ static void ShowHelpWindow(void) {
     NSInteger _idleLookClock;
     NSPoint _dragOffset;
     BOOL _dragging;
+    BOOL _pointerHeld;
+    NSPoint _latestPointer;
+    NSTimeInterval _pressStartedAt;
+    NSInteger _dragVisualTick;
+    BOOL _dropping;
+    NSInteger _dropTick;
     CGFloat _jumpBaseY;
     CGFloat _jumpHeight;
     NSInteger _jumpTick;
@@ -1149,35 +1178,35 @@ static void ShowHelpWindow(void) {
         [self cancelHunt];
         [self setMode:PetModeIdle ticks:80 loops:0];
     }
-    _dragging = NO;
+    _pointerHeld = YES;
+    _pressStartedAt = NSDate.timeIntervalSinceReferenceDate;
+    _latestPointer = location;
     _dragOffset = NSMakePoint(location.x - _panel.frame.origin.x,
                               location.y - _panel.frame.origin.y);
 }
 - (void)petMouseDraggedTo:(NSPoint)location {
     [self noteInteraction];
-    if (!_dragging) {
-        if (_mode == PetModeHissing) {
-            _hissBaseX = _panel.frame.origin.x;
-            [self setMode:PetModeIdle ticks:80 loops:0];
-        }
-        [_speechTimer invalidate];
-        _speechTimer = nil;
-        [_speechPanel orderOut:nil];
+    _latestPointer = location;
+    if (_dragging) {
+        [_panel setFrameOrigin:NSMakePoint(location.x - _dragOffset.x,
+                                           location.y - _dragOffset.y)];
     }
-    _dragging = YES;
-    [_panel setFrameOrigin:NSMakePoint(location.x - _dragOffset.x,
-                                       location.y - _dragOffset.y)];
 }
 - (void)petMouseUpWithClickCount:(NSInteger)clickCount {
+    _pointerHeld = NO;
+    BOOL wasDragging = _dragging;
     _dragging = NO;
     [self clampToCurrentScreen];
     [_stats recordInteraction];
-    if (clickCount == 0) {
+    if (wasDragging) {
         _pokeCount = 0;
         [self savePosition];
-        [self triggerHiss];
+        _dropping = YES;
+        _dropTick = 0;
+        [self updateDragVisualForPhase:0.0 dropping:YES];
         return;
     }
+    _dropping = NO;
     if (clickCount >= 2) {
         _pokeCount = 0;
         [self triggerJump];
@@ -1194,6 +1223,61 @@ static void ShowHelpWindow(void) {
     }
 }
 
+- (void)beginLongPressDrag {
+    if (!_pointerHeld || _dragging) return;
+    [self cancelHunt];
+    [self setMode:PetModeIdle ticks:80 loops:0];
+    _dropping = NO;
+    _dragging = YES;
+    _dragVisualTick = 0;
+    [_speechTimer invalidate];
+    _speechTimer = nil;
+    [_speechPanel orderOut:nil];
+    _view.currentFrame = [_atlas dragFrameAtColumn:0];
+    [_panel setFrameOrigin:NSMakePoint(_latestPointer.x - _dragOffset.x,
+                                       _latestPointer.y - _dragOffset.y)];
+    [self updateDragVisualForPhase:0.0 dropping:NO];
+}
+
+- (void)updateDragVisualForPhase:(CGFloat)progress dropping:(BOOL)dropping {
+    CGFloat clamped = MAX(0.0, MIN(1.0, progress));
+    CGFloat eased = 1.0 - pow(1.0 - clamped, 3.0);
+    CGFloat lift = dropping ? 1.0 - eased : eased;
+    CGFloat squash = dropping ? sin(clamped * M_PI) : 0.0;
+    NSInteger step = MIN(4, (NSInteger)floor(clamped * 5.0));
+    _view.currentFrame = [_atlas dragFrameAtColumn:dropping ? 4 - step : step];
+    _view.visualYOffset = 10.0 * _scale - 12.0 * _scale * lift;
+    _view.visualScaleX = (dropping ? 1.0 + squash * 0.035 : 0.96 + 0.04 * lift);
+    _view.visualScaleY = (dropping ? 1.0 - squash * 0.055 : 0.96 + 0.04 * lift);
+    _view.visualRotation = 0.0;
+    _view.needsDisplay = YES;
+}
+
+- (void)tickDrag {
+    _dragVisualTick += 1;
+    CGFloat progress = MIN(1.0, (CGFloat)_dragVisualTick / (CGFloat)kDragLiftTicks);
+    [self updateDragVisualForPhase:progress dropping:NO];
+    if (progress >= 1.0) {
+        CGFloat sway = sin((CGFloat)(_dragVisualTick - kDragLiftTicks) * 0.22);
+        _view.visualYOffset = -2.0 * _scale + sway * 1.5 * _scale;
+        _view.visualRotation = sway * 0.018;
+        _view.needsDisplay = YES;
+    }
+}
+
+- (void)tickDrop {
+    _dropTick += 1;
+    CGFloat progress = MIN(1.0, (CGFloat)_dropTick / (CGFloat)kDragDropTicks);
+    [self updateDragVisualForPhase:progress dropping:YES];
+    if (progress < 1.0) return;
+    _dropping = NO;
+    _view.visualScaleX = 1.0;
+    _view.visualScaleY = 1.0;
+    _view.visualYOffset = 0.0;
+    _view.visualRotation = 0.0;
+    [self startHissWithLoops:3];
+}
+
 - (void)tick:(NSTimer *)timer {
     _fullscreenCheckClock += 1;
     if (_fullscreenCheckClock >= 12) {
@@ -1205,7 +1289,16 @@ static void ShowHelpWindow(void) {
     _lastStatsTickTime = now;
     if (_petIsVisible) [_stats addVisibleSeconds:elapsed];
     if (!_petIsVisible) return;
-    if (_dragging) return;
+    if (_pointerHeld && !_dragging &&
+        now - _pressStartedAt >= kDragLongPressDelay) [self beginLongPressDrag];
+    if (_dragging) {
+        [self tickDrag];
+        return;
+    }
+    if (_dropping) {
+        [self tickDrop];
+        return;
+    }
     if (_huntCooldownTicks > 0) _huntCooldownTicks -= 1;
     [self updateAutomaticSleep];
     if (_sleeping) {
@@ -1516,6 +1609,10 @@ static void ShowHelpWindow(void) {
         [_panel setFrameOrigin:origin];
     }
     _mode = newMode;
+    _view.visualScaleX = 1.0;
+    _view.visualScaleY = 1.0;
+    _view.visualYOffset = 0.0;
+    _view.visualRotation = 0.0;
     _frameIndex = 0;
     _frameClock = 0;
     _phaseTicks = ticks;

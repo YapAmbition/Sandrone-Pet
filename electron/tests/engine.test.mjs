@@ -4,12 +4,13 @@ import { PetEngine } from '../src/renderer/engine.mjs';
 
 function fixture() {
   let now = 0;
-  const events = { frames: [], moves: [], records: [], speeches: [], states: [] };
+  const events = { frames: [], moves: [], records: [], speeches: [], states: [], speechHides: 0 };
   const engine = new PetEngine({
     render: (value) => events.frames.push(value),
     moveTo: (x, y) => events.moves.push({ x, y }),
     record: (value) => events.records.push(value),
     speech: (text) => events.speeches.push(text),
+    hideSpeech: () => { events.speechHides += 1; },
     publish: (state) => events.states.push(state)
   }, () => now);
   engine.initialize({
@@ -20,14 +21,80 @@ function fixture() {
   return { engine, events, advance: (milliseconds) => { now += milliseconds; } };
 }
 
-test('drag release records one interaction and starts one hiss', () => {
-  const { engine, events } = fixture();
+test('long press drag releases through a landing animation into one hiss', () => {
+  const { engine, events, advance } = fixture();
   engine.pointerDown({ x: 820, y: 630 });
   engine.pointerDrag({ x: 900, y: 650 }, { x: 80, y: 20 });
-  engine.pointerUp(0);
+  advance(249);
+  engine.tick();
+  assert.equal(engine.dragging, false);
+  advance(1);
+  engine.tick();
+  assert.equal(engine.dragging, true);
+  for (let index = 0; index < 7; index += 1) engine.tick();
+  assert.deepEqual([...new Set(events.frames.filter((frame) => frame.kind === 'drag')
+    .map((frame) => frame.column))], [0, 1, 2, 3, 4]);
+  engine.pointerDrag({ x: 900, y: 650 }, { x: 80, y: 20 });
+  assert.equal(engine.pointerUp(1), true);
+  assert.equal(engine.dropping, true);
+  for (let index = 0; index < 8; index += 1) engine.tick();
+  const dropColumns = events.frames.filter((frame) => frame.kind === 'drag' && frame.phase === 'dropping')
+    .map((frame) => frame.column);
+  assert.equal(dropColumns[0], 4);
+  assert.equal(dropColumns.at(-1), 0);
   assert.equal(engine.mode, 'hissing');
   assert.deepEqual(events.records, ['interactions', 'hisses']);
   assert.equal(events.speeches.at(-1), '哈?~~');
+});
+
+test('holding still for 250ms picks the pet up', () => {
+  const { engine, events, advance } = fixture();
+  engine.pointerDown({ x: 820, y: 630 });
+  advance(250);
+  engine.tick();
+  assert.equal(engine.dragging, true);
+  assert.equal(events.frames.at(-1).kind, 'drag');
+});
+
+test('quick pointer movement stays a click until the hold threshold', () => {
+  const { engine, events, advance } = fixture();
+  engine.pointerDown({ x: 820, y: 630 });
+  engine.pointerDrag({ x: 1000, y: 700 }, { x: 180, y: 70 });
+  advance(200);
+  engine.tick();
+  assert.equal(engine.dragging, false);
+  assert.equal(engine.pointerUp(1), false);
+  assert.equal(engine.mode, 'waving');
+  assert.deepEqual(events.records, ['interactions']);
+});
+
+test('re-grabbing during hiss uses the new drag position as the next hiss anchor', () => {
+  const { engine, events, advance } = fixture();
+  engine.triggerHiss();
+  engine.pointerDown({ x: 820, y: 630 });
+  advance(250);
+  engine.tick();
+  engine.pointerDrag({ x: 950, y: 680 }, { x: 130, y: 50 });
+  engine.pointerUp(1);
+  for (let index = 0; index < 8; index += 1) engine.tick();
+  assert.equal(engine.hissBaseX, 930);
+  assert.equal(events.moves.at(-1).x, 930);
+  assert.ok(events.speechHides > 0);
+});
+
+test('a second long press cleanly interrupts the landing animation', () => {
+  const { engine, advance } = fixture();
+  engine.pointerDown({ x: 820, y: 630 });
+  advance(250);
+  engine.tick();
+  engine.pointerUp(1);
+  assert.equal(engine.dropping, true);
+
+  engine.pointerDown({ x: 820, y: 630 });
+  advance(250);
+  engine.tick();
+  assert.equal(engine.dragging, true);
+  assert.equal(engine.dropping, false);
 });
 
 test('automatic sleep begins after one minute of inactivity', () => {

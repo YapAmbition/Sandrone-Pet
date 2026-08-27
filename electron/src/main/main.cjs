@@ -477,7 +477,9 @@ function registerIpc() {
     assets: {
       spritesheet: assetUrl('spritesheet.png'),
       proud: Array.from({ length: 6 }, (_, index) => assetUrl(`Proud/proud-${index}.png`)),
-      sleep: Array.from({ length: 6 }, (_, index) => assetUrl(`Sleep/sleep-${index}.png`))
+      sleep: Array.from({ length: 6 }, (_, index) => assetUrl(`Sleep/sleep-${index}.png`)),
+      drag: ['lift-1.png', 'lift-2.png', 'lift-3.png', 'lift-4.png', 'held.png']
+        .map((name) => assetUrl(`Drag/${name}`))
     },
     settings: settingsSnapshot(),
     platform: process.platform,

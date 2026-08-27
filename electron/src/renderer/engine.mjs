@@ -1,6 +1,10 @@
 export const CELL_WIDTH = 192;
 export const CELL_HEIGHT = 208;
 export const TICK_MS = 1000 / 24;
+export const LONG_PRESS_MS = 250;
+
+const LIFT_TICKS = 7;
+const DROP_TICKS = 8;
 
 const FRAME_COUNTS = {
   idle: 6,
@@ -35,6 +39,10 @@ function randomBetween(lower, upper) {
 function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function clamp(value, minimum, maximum) { return Math.max(minimum, Math.min(maximum, value)); }
 function transient(mode) { return !['idle', 'walkRight', 'walkLeft', 'sleeping'].includes(mode); }
+function dragColumn(progress, dropping) {
+  const step = Math.min(4, Math.floor(clamp(progress, 0, 1) * 5));
+  return dropping ? 4 - step : step;
+}
 
 export class PetEngine {
   constructor(hooks = {}, now = () => performance.now()) {
@@ -67,7 +75,12 @@ export class PetEngine {
     this.transientLoopsRemaining = 0;
     this.idleLookClock = 0;
     this.dragging = false;
-    this.didDrag = false;
+    this.pointerHeld = false;
+    this.pressStartedAt = 0;
+    this.latestPointer = null;
+    this.dragVisualTick = 0;
+    this.dropping = false;
+    this.dropTick = 0;
     this.dragOffset = { x: 0, y: 0 };
     this.jumpBaseY = 0;
     this.jumpHeight = 0;
@@ -276,8 +289,9 @@ export class PetEngine {
       this.cancelHunt();
       this.setMode('idle', 80, 0);
     }
-    this.dragging = false;
-    this.didDrag = false;
+    this.pointerHeld = true;
+    this.pressStartedAt = this.now();
+    this.latestPointer = { ...screenPoint };
     this.dragOffset = {
       x: screenPoint.x - this.environment.bounds.x,
       y: screenPoint.y - this.environment.bounds.y
@@ -286,35 +300,45 @@ export class PetEngine {
 
   pointerDrag(screenPoint, movement) {
     this.noteInteraction();
-    if (!this.dragging) {
-      if (this.mode === 'hissing') {
-        this.hissBaseX = this.environment.bounds.x;
-        this.setMode('idle', 80, 0);
-      }
-      this.hooks.hideSpeech();
-    }
-    if (Math.hypot(movement.x, movement.y) > 3) this.didDrag = true;
-    this.dragging = true;
-    this.moveTo(screenPoint.x - this.dragOffset.x, screenPoint.y - this.dragOffset.y);
+    this.latestPointer = { ...screenPoint };
+    if (this.dragging) this.moveTo(screenPoint.x - this.dragOffset.x, screenPoint.y - this.dragOffset.y);
   }
 
   pointerUp(clickCount) {
-    const wasDrag = this.didDrag;
+    this.pointerHeld = false;
+    this.latestPointer = null;
+    const wasDrag = this.dragging;
     this.dragging = false;
-    this.didDrag = false;
     this.hooks.record('interactions');
     if (wasDrag) {
       this.hooks.savePosition();
-      this.startHiss(3);
-      return;
+      this.startDrop();
+      return true;
     }
+    this.dropping = false;
     if (clickCount >= 3) this.triggerHiss();
     else if (clickCount === 2) this.triggerJump();
     else this.triggerWave();
+    return false;
+  }
+
+  pointerCancel() {
+    this.pointerHeld = false;
+    this.latestPointer = null;
+    if (!this.dragging) return;
+    this.dragging = false;
+    this.hooks.record('interactions');
+    this.hooks.savePosition();
+    this.startDrop();
   }
 
   tick() {
-    if (!this.environment.visible || this.dragging) return;
+    if (!this.environment.visible) return;
+    if (this.pointerHeld && !this.dragging && this.now() - this.pressStartedAt >= LONG_PRESS_MS) {
+      this.beginDrag();
+    }
+    if (this.dragging) return this.tickDrag();
+    if (this.dropping) return this.tickDrop();
     if (this.huntCooldownTicks > 0) this.huntCooldownTicks -= 1;
     this.updateAutomaticSleep();
     if (this.sleeping) return this.tickSleeping();
@@ -354,6 +378,53 @@ export class PetEngine {
       this.phaseTicks -= 1;
       if (this.phaseTicks <= 0) this.chooseNextRoamPhase();
     }
+  }
+
+  beginDrag() {
+    if (!this.pointerHeld || this.dragging) return;
+    this.cancelHunt();
+    this.setMode('idle', 80, 0);
+    this.sleeping = false;
+    this.sleepRequested = false;
+    this.dropping = false;
+    this.dragging = true;
+    this.dragVisualTick = 0;
+    this.hooks.hideSpeech();
+    if (this.latestPointer) {
+      this.moveTo(this.latestPointer.x - this.dragOffset.x, this.latestPointer.y - this.dragOffset.y);
+    }
+    this.hooks.render({ kind: 'drag', phase: 'lifting', progress: 0, sway: 0, column: 0 });
+    this.hooks.publish({ mode: 'dragging', sleeping: false });
+  }
+
+  tickDrag() {
+    this.dragVisualTick += 1;
+    const progress = Math.min(1, this.dragVisualTick / LIFT_TICKS);
+    const sway = progress < 1 ? 0 : Math.sin((this.dragVisualTick - LIFT_TICKS) * 0.22);
+    this.hooks.render({
+      kind: 'drag',
+      phase: progress < 1 ? 'lifting' : 'held',
+      progress,
+      sway,
+      column: dragColumn(progress, false)
+    });
+  }
+
+  startDrop() {
+    this.dropping = true;
+    this.dropTick = 0;
+    this.hooks.render({ kind: 'drag', phase: 'dropping', progress: 0, sway: 0, column: 4 });
+    this.hooks.publish({ mode: 'dropping', sleeping: false });
+  }
+
+  tickDrop() {
+    this.dropTick += 1;
+    const progress = Math.min(1, this.dropTick / DROP_TICKS);
+    this.hooks.render({ kind: 'drag', phase: 'dropping', progress, sway: 0,
+      column: dragColumn(progress, true) });
+    if (progress < 1) return;
+    this.dropping = false;
+    this.startHiss(3);
   }
 
   updateAutomaticSleep() {
