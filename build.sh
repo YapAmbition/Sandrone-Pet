@@ -33,6 +33,7 @@ cp "$ROOT_DIR/Assets/AppIcon.png" "$RESOURCES_DIR/AppIcon.png"
 ditto "$ROOT_DIR/Assets/Proud" "$RESOURCES_DIR/Proud"
 ditto "$ROOT_DIR/Assets/Sleep" "$RESOURCES_DIR/Sleep"
 ditto "$ROOT_DIR/Assets/Drag" "$RESOURCES_DIR/Drag"
+ditto "$ROOT_DIR/Assets/Gifts" "$RESOURCES_DIR/Gifts"
 
 codesign --force --deep --sign - "$APP_DIR"
 

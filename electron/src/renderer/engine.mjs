@@ -236,10 +236,10 @@ export class PetEngine {
 
   triggerHiss() {
     this.noteInteraction();
-    this.startHiss(3);
+    this.startHiss(2);
   }
 
-  startHiss(loops = 3) {
+  startHiss(loops = 2) {
     this.hooks.record('hisses');
     this.cancelHunt();
     if (this.mode === 'hissing') this.moveTo(this.hissBaseX, this.environment.bounds.y);
@@ -424,7 +424,7 @@ export class PetEngine {
       column: dragColumn(progress, true) });
     if (progress < 1) return;
     this.dropping = false;
-    this.startHiss(3);
+    this.startHiss(2);
   }
 
   updateAutomaticSleep() {
