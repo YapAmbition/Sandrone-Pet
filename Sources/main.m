@@ -30,7 +30,7 @@ typedef NS_ENUM(NSInteger, PetActivityLevel) {
 static const CGFloat kCellWidth = 192.0;
 static const CGFloat kCellHeight = 208.0;
 static const CGFloat kStandardPetScale = 0.75;
-static const CGFloat kMinimumPetScale = 0.5625;
+static const CGFloat kMinimumPetScale = 0.375;
 static const CGFloat kMaximumPetScale = 1.125;
 static const CGFloat kSpeechBubbleWidth = 132.0;
 static const CGFloat kSpeechBubbleHeight = 62.0;
@@ -2369,8 +2369,9 @@ static void ShowHelpWindow(void) {
     NSScreen *screen = [self screenForPanel];
     NSRect visible = screen ? screen.visibleFrame : NSScreen.mainScreen.visibleFrame;
     NSSize size = _speechPanel.frame.size;
+    CGFloat factor = _scale / kStandardPetScale;
     CGFloat x = NSMidX(_panel.frame) - size.width / 2.0;
-    CGFloat y = NSMaxY(_panel.frame) - 8.0;
+    CGFloat y = NSMaxY(_panel.frame) - 8.0 * factor;
     x = MAX(NSMinX(visible) + 4.0, MIN(x, NSMaxX(visible) - size.width - 4.0));
     y = MAX(NSMinY(visible) + 4.0, MIN(y, NSMaxY(visible) - size.height - 4.0));
     [_speechPanel setFrameOrigin:NSMakePoint(x, y)];
@@ -2557,6 +2558,7 @@ static void ShowHelpWindow(void) {
 
     NSMenu *sizeMenu = [[NSMenu alloc] initWithTitle:@"宠物大小"];
     NSArray *sizes = @[
+        @[@"迷你 50%", @0.375],
         @[@"小 75%", @0.5625],
         @[@"标准 100%", @0.75],
         @[@"大 125%", @0.9375],

@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { JsonStore } = require('./store.cjs');
 const { PetStats } = require('./stats.cjs');
 const { MovementAreaTracker } = require('./movement-area.cjs');
+const { canonicalBounds, scaledSize } = require('./window-geometry.cjs');
 const { windowsLaunchExecutable } = require('./windows-paths.cjs');
 const { GIFTS } = require('./gifts.cjs');
 const SMOKE_TEST = process.env.HISSY_SMOKE_TEST === '1';
@@ -15,7 +16,7 @@ const CELL_HEIGHT = 208;
 const STANDARD_SCALE = 0.75;
 const SPEECH_WIDTH = 190;
 const SPEECH_HEIGHT = 68;
-const MIN_SCALE = 0.5625;
+const MIN_SCALE = 0.375;
 const MAX_SCALE = 1.125;
 const DEFAULTS = {
   scale: 0.75,
@@ -66,18 +67,34 @@ function validScale(value) {
 
 function petSize() {
   const scale = validScale(store.get('scale'));
-  return { width: Math.round(CELL_WIDTH * scale), height: Math.round(CELL_HEIGHT * scale) };
+  return scaledSize(CELL_WIDTH, CELL_HEIGHT, scale);
+}
+
+function speechSize() {
+  const factor = validScale(store.get('scale')) / STANDARD_SCALE;
+  return scaledSize(SPEECH_WIDTH, SPEECH_HEIGHT, factor);
+}
+
+function giftSize() {
+  const factor = validScale(store.get('scale')) / STANDARD_SCALE;
+  return scaledSize(70, 70, factor);
 }
 
 function clampBounds(bounds) {
-  const display = screen.getDisplayMatching(bounds);
+  const size = petSize();
+  const display = screen.getDisplayMatching({ ...bounds, ...size });
   const area = movementAreas.areaFor(display);
-  return {
-    x: Math.round(Math.max(area.x, Math.min(bounds.x, area.x + area.width - bounds.width))),
-    y: Math.round(Math.max(area.y, Math.min(bounds.y, area.y + area.height - bounds.height))),
-    width: bounds.width,
-    height: bounds.height
-  };
+  return canonicalBounds(bounds, area, size);
+}
+
+function normalizedPetBounds() {
+  if (!petWindow || petWindow.isDestroyed()) return null;
+  const actual = petWindow.getBounds();
+  const expected = clampBounds(actual);
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    petWindow.setBounds(expected, false);
+  }
+  return expected;
 }
 
 function defaultBounds() {
@@ -123,21 +140,27 @@ function savePosition() {
 
 function positionSpeechBubble() {
   if (!petWindow || !speechWindow || petWindow.isDestroyed() || speechWindow.isDestroyed()) return;
-  const pet = petWindow.getBounds();
-  const bubble = speechWindow.getBounds();
+  const pet = normalizedPetBounds();
+  const bubble = speechSize();
+  const factor = validScale(store.get('scale')) / STANDARD_SCALE;
+  const overlap = Math.round(12 * factor);
   const display = screen.getDisplayMatching(pet);
   const area = movementAreas.areaFor(display);
   let x = Math.round(pet.x + pet.width / 2 - bubble.width / 2);
-  let y = Math.round(pet.y - bubble.height + 12);
+  let y = Math.round(pet.y - bubble.height + overlap);
   x = Math.max(area.x + 4, Math.min(x, area.x + area.width - bubble.width - 4));
-  if (y < area.y + 4) y = Math.min(area.y + area.height - bubble.height - 4, pet.y + pet.height - 12);
-  speechWindow.setPosition(x, y, false);
+  if (y < area.y + 4) y = Math.min(area.y + area.height - bubble.height - 4, pet.y + pet.height - overlap);
+  const actual = speechWindow.getBounds();
+  const expected = { x, y, ...bubble };
+  if (actual.x !== x || actual.y !== y || actual.width !== bubble.width || actual.height !== bubble.height) {
+    speechWindow.setBounds(expected, false);
+  }
 }
 
 function positionGiftWindow() {
   if (!petWindow || !giftWindow || petWindow.isDestroyed() || giftWindow.isDestroyed()) return;
-  const pet = petWindow.getBounds();
-  const gift = giftWindow.getBounds();
+  const pet = normalizedPetBounds();
+  const gift = giftSize();
   const area = movementAreas.areaFor(screen.getDisplayMatching(pet));
   const factor = validScale(store.get('scale')) / STANDARD_SCALE;
   const gap = Math.round(3.5 * factor);
@@ -147,13 +170,16 @@ function positionGiftWindow() {
   x = Math.max(area.x + 4, Math.min(x, area.x + area.width - gift.width - 4));
   let y = Math.round(pet.y + (pet.height - gift.height) * 0.42);
   y = Math.max(area.y + 4, Math.min(y, area.y + area.height - gift.height - 4));
-  giftWindow.setPosition(x, y, false);
+  const actual = giftWindow.getBounds();
+  const expected = { x, y, ...gift };
+  if (actual.x !== x || actual.y !== y || actual.width !== gift.width || actual.height !== gift.height) {
+    giftWindow.setBounds(expected, false);
+  }
 }
 
 function resizeSpeechBubble() {
   if (!speechWindow || speechWindow.isDestroyed()) return;
   const factor = validScale(store.get('scale')) / STANDARD_SCALE;
-  speechWindow.setSize(Math.round(SPEECH_WIDTH * factor), Math.round(SPEECH_HEIGHT * factor), false);
   speechWindow.webContents.setZoomFactor(factor);
   positionSpeechBubble();
 }
@@ -161,8 +187,6 @@ function resizeSpeechBubble() {
 function resizeGiftWindow() {
   if (!giftWindow || giftWindow.isDestroyed()) return;
   const factor = validScale(store.get('scale')) / STANDARD_SCALE;
-  const side = Math.round(70 * factor);
-  giftWindow.setSize(side, side, false);
   giftWindow.webContents.setZoomFactor(factor);
   positionGiftWindow();
 }
@@ -177,9 +201,10 @@ function command(type, value) { sendToPet('pet:command', { type, value }); }
 
 function createSpeechWindow() {
   const factor = validScale(store.get('scale')) / STANDARD_SCALE;
+  const size = speechSize();
   speechWindow = new BrowserWindow({
-    width: Math.round(SPEECH_WIDTH * factor),
-    height: Math.round(SPEECH_HEIGHT * factor),
+    ...size,
+    useContentSize: true,
     frame: false,
     transparent: true,
     resizable: false,
@@ -205,10 +230,10 @@ function createSpeechWindow() {
 
 function createGiftWindow() {
   const factor = validScale(store.get('scale')) / STANDARD_SCALE;
-  const side = Math.round(70 * factor);
+  const size = giftSize();
   giftWindow = new BrowserWindow({
-    width: side,
-    height: side,
+    ...size,
+    useContentSize: true,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -290,6 +315,7 @@ function hideSpeech() {
 function createPetWindow() {
   petWindow = new BrowserWindow({
     ...restoreBounds(),
+    useContentSize: true,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -454,6 +480,7 @@ function commonMenuTemplate(includeQuit = true) {
     },
     {
       label: '宠物大小', submenu: [
+        { label: '迷你 50%', type: 'radio', checked: settings.scale === 0.375, click: () => resizePet(0.375) },
         { label: '小 75%', type: 'radio', checked: settings.scale === 0.5625, click: () => resizePet(0.5625) },
         { label: '标准 100%', type: 'radio', checked: settings.scale === 0.75, click: () => resizePet(0.75) },
         { label: '大 125%', type: 'radio', checked: settings.scale === 0.9375, click: () => resizePet(0.9375) },
@@ -527,7 +554,7 @@ function showHelpWindow() {
 function startEnvironmentFeed() {
   const pollEnvironment = () => {
     if (petWindow && !petWindow.isDestroyed()) {
-      const bounds = petWindow.getBounds();
+      const bounds = normalizedPetBounds();
       const display = screen.getDisplayMatching(bounds);
       sendToPet('pet:environment', {
         cursor: screen.getCursorScreenPoint(),
@@ -618,10 +645,11 @@ function registerIpc() {
     if (!petWindow || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return;
     const current = petWindow.getBounds();
     const next = clampBounds({ ...current, x: point.x, y: point.y });
-    petWindow.setPosition(next.x, next.y, false);
+    if (current.width !== next.width || current.height !== next.height) petWindow.setBounds(next, false);
+    else petWindow.setPosition(next.x, next.y, false);
     sendToPet('pet:move-result', {
       requested: { x: point.x, y: point.y },
-      actual: petWindow.getBounds()
+      actual: normalizedPetBounds()
     });
     positionSpeechBubble();
   });
