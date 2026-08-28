@@ -50,3 +50,14 @@ test('reset also clears the gift box', () => {
   stats.reset();
   assert.deepEqual(stats.snapshot().gifts, { counts: {}, firstFound: {} });
 });
+
+test('traits are persisted and reset to their defaults', () => {
+  const store = new MemoryStore();
+  const stats = new PetStats(store);
+  stats.setTraits({ vitality: 15, temper: 88, boredom: 71, pride: 33, closeness: 52 });
+  assert.equal(stats.snapshot().traits.temper, 88);
+  assert.equal(store.data.stats.traits.closeness, 52);
+  stats.reset();
+  assert.equal(stats.snapshot().traits.vitality, 68);
+  assert.equal(stats.snapshot().traits.temper, 22);
+});

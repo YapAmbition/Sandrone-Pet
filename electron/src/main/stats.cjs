@@ -7,6 +7,22 @@ const EMPTY_METRICS = Object.freeze({
   sleeps: 0
 });
 
+const DEFAULT_TRAITS = Object.freeze({
+  vitality: 68, temper: 22, boredom: 32, pride: 46, closeness: 18,
+  closenessDay: '', closenessGainToday: 0
+});
+
+function normalizeTraits(value = {}) {
+  const result = { ...DEFAULT_TRAITS, ...value };
+  for (const key of ['vitality', 'temper', 'boredom', 'pride', 'closeness']) {
+    const number = Number(result[key]);
+    result[key] = Math.max(0, Math.min(100, Number.isFinite(number) ? number : DEFAULT_TRAITS[key]));
+  }
+  result.closenessDay = typeof result.closenessDay === 'string' ? result.closenessDay : '';
+  result.closenessGainToday = Math.max(0, Number(result.closenessGainToday) || 0);
+  return result;
+}
+
 function localDayKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -25,7 +41,8 @@ class PetStats {
       gifts: {
         counts: { ...(stored.gifts?.counts || {}) },
         firstFound: { ...(stored.gifts?.firstFound || {}) }
-      }
+      },
+      traits: normalizeTraits(stored.traits)
     };
     this.pendingCompanionSeconds = 0;
     this.ensureCurrentDay();
@@ -62,6 +79,11 @@ class PetStats {
     this.save();
   }
 
+  setTraits(value) {
+    this.data.traits = normalizeTraits(value);
+    this.save();
+  }
+
   snapshot() {
     this.ensureCurrentDay();
     return structuredClone(this.data);
@@ -72,7 +94,8 @@ class PetStats {
       dayKey: localDayKey(),
       today: { ...EMPTY_METRICS },
       total: { ...EMPTY_METRICS },
-      gifts: { counts: {}, firstFound: {} }
+      gifts: { counts: {}, firstFound: {} },
+      traits: normalizeTraits()
     };
     this.pendingCompanionSeconds = 0;
     this.save();

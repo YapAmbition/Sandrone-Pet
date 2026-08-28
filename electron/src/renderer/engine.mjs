@@ -1,7 +1,19 @@
 export const CELL_WIDTH = 192;
 export const CELL_HEIGHT = 208;
 export const TICK_MS = 1000 / 24;
+export const SLEEP_TICK_MS = 200;
 export const LONG_PRESS_MS = 250;
+
+import {
+  DEFAULT_TRAITS,
+  normalizeTraits,
+  applyTraitEvent,
+  driftTraits,
+  roamWeights,
+  chooseWeighted,
+  huntWillingness,
+  decorateSpeech
+} from './temperament.mjs';
 
 const LIFT_TICKS = 7;
 const DROP_TICKS = 8;
@@ -53,6 +65,7 @@ export class PetEngine {
       hideSpeech: hooks.hideSpeech || (() => {}),
       record: hooks.record || (() => {}),
       gift: hooks.gift || (() => {}),
+      mood: hooks.mood || (() => {}),
       savePosition: hooks.savePosition || (() => {}),
       publish: hooks.publish || (() => {})
     };
@@ -111,14 +124,21 @@ export class PetEngine {
     this.giftTick = 0;
     this.giftReactionTicks = 0;
     this.giftCooldownTicks = 24 * 8;
+    this.traits = normalizeTraits(DEFAULT_TRAITS);
+    this.lastTraitTickAt = this.now();
+    this.lastMoodPublishAt = this.now();
+    this.lastEmojiAt = -Infinity;
   }
 
-  initialize({ settings, bounds, workArea, gifts = [] }) {
+  initialize({ settings, bounds, workArea, gifts = [], traits }) {
     this.settings = { ...this.settings, ...settings };
     this.environment.bounds = { ...bounds };
     this.environment.workArea = { ...workArea };
     this.jumpBaseY = bounds.y;
     this.giftDefinitions = gifts.map((gift) => ({ ...gift }));
+    this.traits = normalizeTraits(traits || DEFAULT_TRAITS);
+    this.lastTraitTickAt = this.now();
+    this.lastMoodPublishAt = this.now();
     const staysIdle = this.settings.paused || this.settings.activityLevel === 'quiet';
     this.setMode('idle', staysIdle ? Number.MAX_SAFE_INTEGER : 80, 0);
   }
@@ -142,6 +162,11 @@ export class PetEngine {
         this.mode === 'idle') {
       this.chooseNextRoamPhase();
     }
+  }
+
+  replaceTraits(value) {
+    this.traits = normalizeTraits(value || DEFAULT_TRAITS);
+    this.lastMoodPublishAt = this.now();
   }
 
   updateEnvironment(environment) {
@@ -196,6 +221,41 @@ export class PetEngine {
     if (this.sleeping) this.wakeFromSleep();
   }
 
+  mutateTraits(event) {
+    this.traits = applyTraitEvent(this.traits, event, Date.now());
+    this.hooks.mood(this.traits);
+  }
+
+  tickTraits() {
+    const now = this.now();
+    const seconds = Math.max(0, Math.min(2, (now - this.lastTraitTickAt) / 1000));
+    this.lastTraitTickAt = now;
+    if (seconds <= 0) return;
+    this.traits = driftTraits(this.traits, {
+      seconds,
+      sleeping: this.sleeping,
+      secondsSinceInteraction: Math.max(0, (now - this.lastInteractionTime) / 1000)
+    });
+    if (now - this.lastMoodPublishAt >= 10_000) {
+      this.lastMoodPublishAt = now;
+      this.hooks.mood(this.traits);
+    }
+  }
+
+  decorated(base, event) {
+    const result = decorateSpeech(base, event, this.traits, {
+      now: this.now(),
+      lastEmojiAt: this.lastEmojiAt
+    });
+    this.lastEmojiAt = result.lastEmojiAt;
+    return result;
+  }
+
+  speak(base, event, duration, onlyWithEmoji = false) {
+    const result = this.decorated(base, event);
+    if (!onlyWithEmoji || result.usedEmoji) this.hooks.speech(result.text, duration);
+  }
+
   trigger(action) {
     if (action === 'wave') this.triggerWave();
     else if (action === 'proud') this.triggerProud();
@@ -207,13 +267,16 @@ export class PetEngine {
 
   triggerWave() {
     this.noteInteraction();
+    this.mutateTraits('friendly');
     this.cancelGiftPresentation();
     this.startWave();
   }
 
   startWave() {
     this.cancelHunt();
+    this.mutateTraits('wave');
     this.setMode('waving', 90, 2);
+    this.speak('多涅。', 'wave', 1800, true);
   }
 
   triggerProud() {
@@ -222,10 +285,11 @@ export class PetEngine {
     this.startProud();
   }
 
-  startProud() {
+  startProud(event = 'proud') {
     this.cancelHunt();
+    this.mutateTraits('showOff');
     this.setMode('proud', 90, 2);
-    this.hooks.speech('多涅多涅~', 1800);
+    this.speak('多涅多涅~', event, 1800);
   }
 
   triggerJump() {
@@ -236,6 +300,7 @@ export class PetEngine {
 
   startJump() {
     this.cancelHunt();
+    this.mutateTraits('jump');
     if (this.mode === 'jumping') this.moveTo(this.environment.bounds.x, this.jumpBaseY);
     this.jumpBaseY = this.environment.bounds.y;
     this.jumpTick = 0;
@@ -248,18 +313,20 @@ export class PetEngine {
 
   triggerHiss() {
     this.noteInteraction();
+    this.mutateTraits('irritated');
     this.cancelGiftPresentation();
     this.startHiss(2);
   }
 
-  startHiss(loops = 2) {
+  startHiss(loops = 2, event = 'hiss') {
     this.hooks.record('hisses');
     this.cancelHunt();
+    this.mutateTraits('hiss');
     if (this.mode === 'hissing') this.moveTo(this.hissBaseX, this.environment.bounds.y);
     this.hissBaseX = this.environment.bounds.x;
     this.hissTick = 0;
     this.setMode('hissing', 90, loops);
-    this.hooks.speech('哈?~~', Math.max(2000, loops * 1000));
+    this.speak('哈?~~', event, Math.max(2000, loops * 1000));
   }
 
   toggleSleep() {
@@ -329,9 +396,13 @@ export class PetEngine {
       return true;
     }
     this.dropping = false;
-    if (clickCount >= 3) this.triggerHiss();
-    else if (clickCount === 2) this.triggerJump();
-    else this.triggerWave();
+    if (clickCount >= 3) {
+      this.mutateTraits('repeatedPoke');
+      this.startHiss(2, 'hiss');
+    } else if (clickCount === 2) {
+      this.mutateTraits('friendly');
+      this.triggerJump();
+    } else this.triggerWave();
     return false;
   }
 
@@ -347,6 +418,7 @@ export class PetEngine {
 
   tick() {
     if (!this.environment.visible) return;
+    this.tickTraits();
     if (this.pointerHeld && !this.dragging && this.now() - this.pressStartedAt >= LONG_PRESS_MS) {
       this.beginDrag();
     }
@@ -408,6 +480,7 @@ export class PetEngine {
     this.sleepRequested = false;
     this.dropping = false;
     this.dragging = true;
+    this.mutateTraits('drag');
     this.dragVisualTick = 0;
     this.hooks.hideSpeech();
     if (this.latestPointer) {
@@ -444,7 +517,7 @@ export class PetEngine {
       column: dragColumn(progress, true) });
     if (progress < 1) return;
     this.dropping = false;
-    this.startHiss(2);
+    this.startHiss(2, 'drag');
   }
 
   randomGift() {
@@ -474,6 +547,7 @@ export class PetEngine {
     this.giftTick = 0;
     this.giftReactionTicks = 0;
     this.giftCooldownTicks = 24 * 240;
+    this.mutateTraits('gift');
     this.hooks.gift({ type: 'show', gift });
     this.hooks.speech('多涅？', 1100);
   }
@@ -483,8 +557,9 @@ export class PetEngine {
     this.noteInteraction();
     this.hooks.record('interactions');
     this.giftReactionTicks = 32;
+    this.mutateTraits('giftTapped');
     this.hooks.gift({ type: 'reaction' });
-    this.hooks.speech('多涅！💢', 1700);
+    this.speak('多涅！', 'giftTapped', 1700);
   }
 
   cancelGiftPresentation() {
@@ -504,7 +579,7 @@ export class PetEngine {
       this.hooks.render({ kind: 'sheet', row: ROWS.review, column: Math.floor(this.giftTick / 5) % 6 });
     } else {
       this.hooks.render({ kind: 'proud', column: Math.floor(this.giftTick / 5) % 6 });
-      if (this.giftTick === 27) this.hooks.speech('多涅。🎁', 2000);
+      if (this.giftTick === 27) this.speak('多涅。🎁', 'giftProud', 2000);
     }
     if (this.giftTick < 144) return;
     this.cancelGiftPresentation();
@@ -520,11 +595,11 @@ export class PetEngine {
 
   tickSleeping() {
     this.frameClock += 1;
-    if (this.frameClock >= 10) {
+    if (this.frameClock >= 2) {
       this.frameClock = 0;
       this.frameIndex = (this.frameIndex + 1) % FRAME_COUNTS.sleeping;
+      this.hooks.render({ kind: 'sleep', column: this.frameIndex });
     }
-    this.hooks.render({ kind: 'sleep', column: this.frameIndex });
     const pointerDistance = distance(this.environment.cursor, this.center());
     const radius = this.sleepWakeRadius();
     if (!this.wakeProximityArmed) {
@@ -533,7 +608,7 @@ export class PetEngine {
     }
     if (pointerDistance <= radius) {
       this.wakeHoverTicks += 1;
-      if (this.wakeHoverTicks >= 20) {
+      if (this.wakeHoverTicks >= 4) {
         this.lastInteractionTime = this.now();
         this.wakeFromSleep();
       }
@@ -541,6 +616,8 @@ export class PetEngine {
       this.wakeHoverTicks = 0;
     }
   }
+
+  tickIntervalMs() { return this.sleeping ? SLEEP_TICK_MS : TICK_MS; }
 
   updateMouseHunt() {
     const pointer = this.environment.cursor;
@@ -568,8 +645,14 @@ export class PetEngine {
       this.lureScore = Math.max(0, this.lureScore - 0.42);
     }
     if (this.lureScore >= 10.5) {
-      this.noteInteraction();
-      this.beginHunt(pointer);
+      this.lureScore = 0;
+      if (Math.random() <= huntWillingness(this.traits)) {
+        this.noteInteraction();
+        this.beginHunt(pointer);
+      } else {
+        this.huntCooldownTicks = 48;
+        if (this.traits.temper >= 70 && Math.random() < 0.25) this.startHiss(2, 'hiss');
+      }
     }
   }
 
@@ -641,10 +724,12 @@ export class PetEngine {
         this.environment.bounds.height * 1.35;
     if (caught) {
       this.hooks.record('caught');
-      this.startProud();
+      this.mutateTraits('caught');
+      this.startProud('caught');
     } else {
       this.hooks.record('missed');
-      this.startHiss(2);
+      this.mutateTraits('missed');
+      this.startHiss(2, 'missed');
     }
   }
 
@@ -671,13 +756,14 @@ export class PetEngine {
     // only runs while idle, so autonomous movement cannot starve interaction.
     if (this.mode !== 'idle') return this.startTimedIdle();
 
-    const roll = randomBetween(0, 99);
-    if (roll < 25) this.startTimedIdle();
-    else if (roll < 45) this.setMode('walkRight', randomBetween(72, 120), 0);
-    else if (roll < 65) this.setMode('walkLeft', randomBetween(72, 120), 0);
-    else if (roll < 80) this.startWave();
-    else if (roll < 90) this.startJump();
-    else this.startHiss(2);
+    const action = chooseWeighted(roamWeights(this.traits, this.settings.activityLevel));
+    if (action === 'idle') this.startTimedIdle();
+    else if (action === 'walkRight' || action === 'walkLeft') {
+      this.mutateTraits('walk');
+      this.setMode(action, randomBetween(72, 120), 0);
+    } else if (action === 'wave') this.startWave();
+    else if (action === 'jump') this.startJump();
+    else this.startHiss(2, 'hiss');
   }
 
   startTimedIdle() {

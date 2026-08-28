@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PetEngine } from '../src/renderer/engine.mjs';
+import { PetEngine, TICK_MS, SLEEP_TICK_MS } from '../src/renderer/engine.mjs';
 
 function fixture() {
   let now = 0;
@@ -46,7 +46,7 @@ test('long press drag releases through a landing animation into one hiss', () =>
   assert.equal(dropColumns.at(-1), 0);
   assert.equal(engine.mode, 'hissing');
   assert.deepEqual(events.records, ['interactions', 'hisses']);
-  assert.equal(events.speeches.at(-1), '哈?~~');
+  assert.ok(events.speeches.at(-1).startsWith('哈?~~'));
 });
 
 test('holding still for 250ms picks the pet up', () => {
@@ -108,6 +108,20 @@ test('automatic sleep begins after one minute of inactivity', () => {
   assert.ok(events.records.includes('sleeps'));
 });
 
+test('sleeping lowers the renderer tick rate without delaying proximity wake', () => {
+  const { engine, events } = fixture();
+  assert.equal(engine.tickIntervalMs(), TICK_MS);
+  engine.startSleeping();
+  assert.equal(engine.tickIntervalMs(), SLEEP_TICK_MS);
+  engine.updateEnvironment({ cursor: engine.center() });
+  for (let index = 0; index < 3; index += 1) engine.tick();
+  assert.equal(engine.sleeping, true);
+  engine.tick();
+  assert.equal(engine.sleeping, false);
+  assert.equal(engine.tickIntervalMs(), TICK_MS);
+  assert.ok(events.frames.filter((frame) => frame.kind === 'sleep').length <= 3);
+});
+
 test('manual gift discovery shows, reacts, and returns to idle', () => {
   const { engine, events } = fixture();
   engine.triggerGiftDiscovery();
@@ -117,11 +131,11 @@ test('manual gift discovery shows, reacts, and returns to idle', () => {
   assert.equal(events.speeches.at(-1), '多涅？');
 
   for (let index = 0; index < 27; index += 1) engine.tick();
-  assert.equal(events.speeches.at(-1), '多涅。🎁');
+  assert.ok(events.speeches.at(-1).startsWith('多涅。🎁'));
   engine.giftTapped();
   assert.equal(events.records.at(-1), 'interactions');
   assert.equal(events.gifts.at(-1).type, 'reaction');
-  assert.equal(events.speeches.at(-1), '多涅！💢');
+  assert.ok(events.speeches.at(-1).startsWith('多涅！'));
 
   for (let index = 27; index < 144; index += 1) engine.tick();
   assert.equal(engine.giftActive, false);

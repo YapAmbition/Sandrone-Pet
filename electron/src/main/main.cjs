@@ -486,9 +486,9 @@ function showStatsWindow() {
   }
   statsWindow = new BrowserWindow({
     width: 520,
-    height: 690,
+    height: 790,
     minWidth: 480,
-    minHeight: 620,
+    minHeight: 720,
     title: '多涅小记',
     backgroundColor: '#f7f7f8',
     webPreferences: {
@@ -525,18 +525,22 @@ function showHelpWindow() {
 }
 
 function startEnvironmentFeed() {
-  environmentTimer = setInterval(() => {
-    if (!petWindow || petWindow.isDestroyed()) return;
-    const bounds = petWindow.getBounds();
-    const display = screen.getDisplayMatching(bounds);
-    sendToPet('pet:environment', {
-      cursor: screen.getCursorScreenPoint(),
-      bounds,
-      workArea: movementAreas.areaFor(display),
-      visible: petWindow.isVisible()
-    });
-    if (activeGift) positionGiftWindow();
-  }, 42);
+  const pollEnvironment = () => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      const bounds = petWindow.getBounds();
+      const display = screen.getDisplayMatching(bounds);
+      sendToPet('pet:environment', {
+        cursor: screen.getCursorScreenPoint(),
+        bounds,
+        workArea: movementAreas.areaFor(display),
+        visible: petWindow.isVisible()
+      });
+      if (activeGift) positionGiftWindow();
+    }
+    const delay = !petWindow?.isVisible() ? 500 : (latestPetState.sleeping ? 200 : 42);
+    environmentTimer = setTimeout(pollEnvironment, delay);
+  };
+  pollEnvironment();
   companionTimer = setInterval(() => {
     if (petWindow?.isVisible()) {
       stats.add('companionSeconds', 1);
@@ -599,6 +603,7 @@ function registerIpc() {
         .map((name) => assetUrl(`Drag/${name}`))
     },
     gifts: GIFTS.map((gift) => ({ id: gift.id, weight: gift.weight })),
+    traits: stats.snapshot().traits,
     settings: settingsSnapshot(),
     platform: process.platform,
     bounds: petWindow.getBounds(),
@@ -634,6 +639,10 @@ function registerIpc() {
     stats.add(metric, 1);
     statsWindow?.webContents.send('stats:changed');
   });
+  ipcMain.on('mood:update', (_event, traits) => {
+    stats.setTraits(traits);
+    statsWindow?.webContents.send('stats:changed');
+  });
   ipcMain.handle('stats:snapshot', () => ({
     ...stats.snapshot(),
     giftDefinitions: GIFTS.map((gift) => ({
@@ -654,11 +663,12 @@ function registerIpc() {
       defaultId: 0,
       cancelId: 0,
       message: '要清空多涅小记吗？',
-      detail: '今天、累计记录和小箱子收藏都会清空，此操作无法撤销。'
+      detail: '今天、累计记录、当前状态和小箱子收藏都会清空，此操作无法撤销。'
     });
     if (result.response !== 1) return false;
     stats.reset();
     store.set('seenGiftCount', 0);
+    command('traits', stats.snapshot().traits);
     return true;
   });
 }
@@ -700,7 +710,7 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', () => {
   savePosition();
   stats?.save();
-  clearInterval(environmentTimer);
+  clearTimeout(environmentTimer);
   clearInterval(companionTimer);
   clearTimeout(speechTimer);
   giftWindow?.close();

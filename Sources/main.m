@@ -36,6 +36,8 @@ static const CGFloat kSpeechBubbleWidth = 132.0;
 static const CGFloat kSpeechBubbleHeight = 62.0;
 static const NSTimeInterval kAutomaticSleepDelay = 60.0;
 static const NSTimeInterval kDragLongPressDelay = 0.25;
+static const NSTimeInterval kActiveTickInterval = 1.0 / 24.0;
+static const NSTimeInterval kSleepingTickInterval = 1.0 / 6.0;
 static const NSInteger kDragLiftTicks = 7;
 static const NSInteger kDragDropTicks = 8;
 
@@ -66,6 +68,23 @@ static BOOL IsTransientMode(PetMode mode) {
 
 static NSInteger RandomBetween(NSInteger lower, NSInteger upper) {
     return lower + (NSInteger)arc4random_uniform((uint32_t)(upper - lower + 1));
+}
+
+static CGFloat RandomUnit(void) {
+    return (CGFloat)arc4random_uniform(UINT32_MAX) / (CGFloat)UINT32_MAX;
+}
+
+static CGFloat ClampTrait(CGFloat value) { return MAX(0.0, MIN(100.0, value)); }
+
+static CGFloat BoundedTraitChange(CGFloat value, CGFloat delta) {
+    CGFloat current = ClampTrait(value);
+    if (delta >= 0.0) return ClampTrait(current + delta * (1.0 - current / 100.0));
+    return ClampTrait(current + delta * (current / 100.0));
+}
+
+static CGFloat ApproachTrait(CGFloat value, CGFloat target, CGFloat rate, NSTimeInterval seconds) {
+    CGFloat factor = 1.0 - exp(-MAX(0.0, seconds) * rate);
+    return ClampTrait(value + (target - value) * factor);
 }
 
 static NSArray<NSDictionary<NSString *, id> *> *GiftDefinitions(void) {
@@ -127,6 +146,11 @@ static NSDictionary<NSString *, id> *RandomGiftDefinition(void) {
 @property(nonatomic, readonly) NSInteger totalSleeps;
 @property(nonatomic, readonly) NSInteger totalGifts;
 @property(nonatomic, readonly) NSInteger discoveredGiftKinds;
+@property(nonatomic, readonly) CGFloat vitality;
+@property(nonatomic, readonly) CGFloat temperValue;
+@property(nonatomic, readonly) CGFloat boredom;
+@property(nonatomic, readonly) CGFloat pride;
+@property(nonatomic, readonly) CGFloat closeness;
 - (void)addVisibleSeconds:(NSTimeInterval)seconds;
 - (void)recordInteraction;
 - (void)recordCaught;
@@ -134,6 +158,10 @@ static NSDictionary<NSString *, id> *RandomGiftDefinition(void) {
 - (void)recordHiss;
 - (void)recordSleep;
 - (void)recordGiftWithIdentifier:(NSString *)identifier;
+- (void)applyTraitEvent:(NSString *)event;
+- (void)updateTraitsForElapsed:(NSTimeInterval)elapsed
+                     sleeping:(BOOL)sleeping
+       secondsSinceInteraction:(NSTimeInterval)secondsSinceInteraction;
 - (NSInteger)giftCountForIdentifier:(NSString *)identifier;
 - (NSDate *)firstFoundDateForIdentifier:(NSString *)identifier;
 - (void)save;
@@ -166,6 +194,13 @@ static NSString *CurrentStatsDayKey(void) {
     NSMutableDictionary<NSString *, NSNumber *> *_giftCounts;
     NSMutableDictionary<NSString *, NSDate *> *_giftFirstFoundDates;
     NSTimeInterval _secondsSinceSave;
+    CGFloat _vitality;
+    CGFloat _temperValue;
+    CGFloat _boredom;
+    CGFloat _pride;
+    CGFloat _closeness;
+    NSString *_closenessDay;
+    CGFloat _closenessGainToday;
 }
 
 - (instancetype)init {
@@ -187,6 +222,13 @@ static NSString *CurrentStatsDayKey(void) {
     _totalSleeps = [defaults integerForKey:@"statsTotalSleeps"];
     _giftCounts = [[defaults dictionaryForKey:@"giftCounts"] mutableCopy] ?: [NSMutableDictionary dictionary];
     _giftFirstFoundDates = [[defaults dictionaryForKey:@"giftFirstFoundDates"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    _vitality = [defaults objectForKey:@"traitVitality"] ? [defaults doubleForKey:@"traitVitality"] : 68.0;
+    _temperValue = [defaults objectForKey:@"traitTemper"] ? [defaults doubleForKey:@"traitTemper"] : 22.0;
+    _boredom = [defaults objectForKey:@"traitBoredom"] ? [defaults doubleForKey:@"traitBoredom"] : 32.0;
+    _pride = [defaults objectForKey:@"traitPride"] ? [defaults doubleForKey:@"traitPride"] : 46.0;
+    _closeness = [defaults objectForKey:@"traitCloseness"] ? [defaults doubleForKey:@"traitCloseness"] : 18.0;
+    _closenessDay = [defaults stringForKey:@"traitClosenessDay"] ?: @"";
+    _closenessGainToday = [defaults doubleForKey:@"traitClosenessGainToday"];
     [self ensureCurrentDay];
     return self;
 }
@@ -222,6 +264,65 @@ static NSString *CurrentStatsDayKey(void) {
     return total;
 }
 - (NSInteger)discoveredGiftKinds { return _giftCounts.count; }
+- (CGFloat)vitality { return _vitality; }
+- (CGFloat)temperValue { return _temperValue; }
+- (CGFloat)boredom { return _boredom; }
+- (CGFloat)pride { return _pride; }
+- (CGFloat)closeness { return _closeness; }
+
+- (void)addCloseness:(CGFloat)requested {
+    NSString *today = CurrentStatsDayKey();
+    if (![_closenessDay isEqualToString:today]) {
+        _closenessDay = today;
+        _closenessGainToday = 0.0;
+    }
+    CGFloat granted = MIN(MAX(0.0, requested), MAX(0.0, 2.0 - _closenessGainToday));
+    if (granted <= 0.0) return;
+    CGFloat before = _closeness;
+    _closeness = BoundedTraitChange(_closeness, granted);
+    _closenessGainToday += _closeness - before;
+}
+
+- (void)applyTraitEvent:(NSString *)event {
+    NSDictionary<NSString *, NSDictionary<NSString *, NSNumber *> *> *events = @{
+        @"walk": @{@"vitality": @-2, @"boredom": @-1},
+        @"wave": @{@"vitality": @-1, @"boredom": @-3},
+        @"jump": @{@"vitality": @-4, @"pride": @1},
+        @"hiss": @{@"vitality": @-1, @"temper": @-5},
+        @"irritated": @{@"temper": @10},
+        @"repeatedPoke": @{@"temper": @14, @"boredom": @-4},
+        @"drag": @{@"temper": @12, @"pride": @-4, @"boredom": @-5},
+        @"caught": @{@"vitality": @-6, @"boredom": @-10, @"pride": @12, @"temper": @-4},
+        @"missed": @{@"vitality": @-5, @"boredom": @-6, @"pride": @-8, @"temper": @8},
+        @"gift": @{@"boredom": @-6, @"pride": @8},
+        @"giftTapped": @{@"temper": @8, @"boredom": @-2},
+        @"showOff": @{@"pride": @-3},
+        @"friendly": @{@"boredom": @-6}
+    };
+    NSDictionary<NSString *, NSNumber *> *deltas = events[event] ?: @{};
+    if (deltas[@"vitality"]) _vitality = BoundedTraitChange(_vitality, deltas[@"vitality"].doubleValue);
+    if (deltas[@"temper"]) _temperValue = BoundedTraitChange(_temperValue, deltas[@"temper"].doubleValue);
+    if (deltas[@"boredom"]) _boredom = BoundedTraitChange(_boredom, deltas[@"boredom"].doubleValue);
+    if (deltas[@"pride"]) _pride = BoundedTraitChange(_pride, deltas[@"pride"].doubleValue);
+    if ([event isEqualToString:@"friendly"]) [self addCloseness:0.35];
+    else if ([event isEqualToString:@"caught"] || [event isEqualToString:@"gift"]) [self addCloseness:0.20];
+}
+
+- (void)updateTraitsForElapsed:(NSTimeInterval)elapsed
+                     sleeping:(BOOL)sleeping
+       secondsSinceInteraction:(NSTimeInterval)secondsSinceInteraction {
+    if (elapsed <= 0.0 || elapsed > 2.0) return;
+    if (sleeping) {
+        _vitality = ApproachTrait(_vitality, 90.0, 0.018, elapsed);
+        _temperValue = ApproachTrait(_temperValue, 15.0, 0.010, elapsed);
+        return;
+    }
+    _vitality = ApproachTrait(_vitality, 62.0, 0.0025, elapsed);
+    _temperValue = ApproachTrait(_temperValue, 20.0, 0.0030, elapsed);
+    _pride = ApproachTrait(_pride, 45.0, 0.0025, elapsed);
+    CGFloat boredomTarget = secondsSinceInteraction < 30.0 ? 20.0 : 70.0;
+    _boredom = ApproachTrait(_boredom, boredomTarget, 0.0090, elapsed);
+}
 
 - (void)addVisibleSeconds:(NSTimeInterval)seconds {
     if (seconds <= 0.0 || seconds > 1.5) return;
@@ -268,6 +369,13 @@ static NSString *CurrentStatsDayKey(void) {
     [defaults setInteger:_totalSleeps forKey:@"statsTotalSleeps"];
     [defaults setObject:_giftCounts.copy forKey:@"giftCounts"];
     [defaults setObject:_giftFirstFoundDates.copy forKey:@"giftFirstFoundDates"];
+    [defaults setDouble:_vitality forKey:@"traitVitality"];
+    [defaults setDouble:_temperValue forKey:@"traitTemper"];
+    [defaults setDouble:_boredom forKey:@"traitBoredom"];
+    [defaults setDouble:_pride forKey:@"traitPride"];
+    [defaults setDouble:_closeness forKey:@"traitCloseness"];
+    [defaults setObject:_closenessDay forKey:@"traitClosenessDay"];
+    [defaults setDouble:_closenessGainToday forKey:@"traitClosenessGainToday"];
     _secondsSinceSave = 0.0;
 }
 
@@ -287,6 +395,13 @@ static NSString *CurrentStatsDayKey(void) {
     _totalSleeps = 0;
     [_giftCounts removeAllObjects];
     [_giftFirstFoundDates removeAllObjects];
+    _vitality = 68.0;
+    _temperValue = 22.0;
+    _boredom = 32.0;
+    _pride = 46.0;
+    _closeness = 18.0;
+    _closenessDay = @"";
+    _closenessGainToday = 0.0;
     [self save];
 }
 @end
@@ -387,6 +502,7 @@ static NSTextField *AddTotalMetric(NSView *parent,
     NSMutableArray<NSTextField *> *_giftDateLabels;
     NSMutableArray<NSTextField *> *_giftNoteLabels;
     NSArray<NSView *> *_journalSubviews;
+    NSMutableDictionary<NSString *, NSProgressIndicator *> *_traitIndicators;
 }
 
 - (instancetype)initWithStats:(PetStats *)stats {
@@ -398,7 +514,7 @@ static NSTextField *AddTotalMetric(NSView *parent,
 
 - (void)buildWindowIfNeeded {
     if (_window) return;
-    _window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 500, 660)
+    _window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 500, 760)
                                          styleMask:NSWindowStyleMaskTitled |
                                                    NSWindowStyleMaskClosable |
                                                    NSWindowStyleMaskMiniaturizable
@@ -414,19 +530,19 @@ static NSTextField *AddTotalMetric(NSView *parent,
     root.state = NSVisualEffectStateActive;
     _window.contentView = root;
 
-    NSBox *avatar = StatsCard(root, NSMakeRect(28, 576, 54, 54),
+    NSBox *avatar = StatsCard(root, NSMakeRect(28, 676, 54, 54),
                               [NSColor colorWithRed:0.94 green:0.87 blue:0.98 alpha:0.96]);
     avatar.cornerRadius = 27.0;
     NSTextField *paw = StatsLabel(NSMakeRect(10, 10, 34, 34), @"🐾",
                                   [NSFont systemFontOfSize:25.0], NSColor.labelColor);
     paw.alignment = NSTextAlignmentCenter;
     [avatar addSubview:paw];
-    [root addSubview:StatsLabel(NSMakeRect(98, 598, 360, 32), @"多涅小记",
+    [root addSubview:StatsLabel(NSMakeRect(98, 698, 360, 32), @"多涅小记",
                                 [NSFont systemFontOfSize:26.0 weight:NSFontWeightBold], NSColor.labelColor)];
-    [root addSubview:StatsLabel(NSMakeRect(99, 576, 360, 20), @"悄悄记下和你待在一起的日子",
+    [root addSubview:StatsLabel(NSMakeRect(99, 676, 360, 20), @"悄悄记下和你待在一起的日子",
                                 [NSFont systemFontOfSize:13.0], NSColor.secondaryLabelColor)];
 
-    NSBox *companionCard = StatsCard(root, NSMakeRect(28, 442, 444, 72),
+    NSBox *companionCard = StatsCard(root, NSMakeRect(28, 542, 444, 72),
                                      [NSColor.systemPurpleColor colorWithAlphaComponent:0.13]);
     [companionCard addSubview:StatsLabel(NSMakeRect(18, 25, 34, 32), @"♡",
                                          [NSFont systemFontOfSize:27.0 weight:NSFontWeightLight],
@@ -438,6 +554,33 @@ static NSTextField *AddTotalMetric(NSView *parent,
                                       [NSFont systemFontOfSize:21.0 weight:NSFontWeightSemibold],
                                       NSColor.labelColor);
     [companionCard addSubview:_todayCompanionLabel];
+
+    [root addSubview:StatsLabel(NSMakeRect(29, 512, 200, 24), @"现在的多涅",
+                                [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
+    NSBox *traitCard = StatsCard(root, NSMakeRect(28, 442, 444, 64),
+                                 [NSColor.systemPurpleColor colorWithAlphaComponent:0.08]);
+    _traitIndicators = [NSMutableDictionary dictionary];
+    NSArray<NSArray *> *traitDefinitions = @[
+        @[@"vitality", @"⚡ 活力"], @[@"temper", @"💢 脾气"], @[@"boredom", @"🧶 无聊"],
+        @[@"pride", @"👑 得意"], @[@"closeness", @"🤍 亲近"]
+    ];
+    for (NSInteger index = 0; index < (NSInteger)traitDefinitions.count; index++) {
+        NSInteger column = index % 3;
+        NSInteger row = index / 3;
+        CGFloat x = 14.0 + column * 142.0;
+        CGFloat y = row == 0 ? 34.0 : 7.0;
+        NSArray *definition = traitDefinitions[index];
+        [traitCard addSubview:StatsLabel(NSMakeRect(x, y + 9, 58, 17), definition[1],
+                                           [NSFont systemFontOfSize:10.0 weight:NSFontWeightMedium],
+                                           NSColor.secondaryLabelColor)];
+        NSProgressIndicator *indicator = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(x + 59, y + 12, 68, 8)];
+        indicator.indeterminate = NO;
+        indicator.minValue = 0;
+        indicator.maxValue = 100;
+        indicator.style = NSProgressIndicatorStyleBar;
+        [traitCard addSubview:indicator];
+        _traitIndicators[definition[0]] = indicator;
+    }
 
     [root addSubview:StatsLabel(NSMakeRect(29, 407, 200, 24), @"今天发生了什么",
                                 [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
@@ -476,19 +619,19 @@ static NSTextField *AddTotalMetric(NSView *parent,
     _giftView.hidden = YES;
     [root addSubview:_giftView];
 
-    NSBox *giftAvatar = StatsCard(_giftView, NSMakeRect(28, 576, 54, 54),
+    NSBox *giftAvatar = StatsCard(_giftView, NSMakeRect(28, 676, 54, 54),
                                   [NSColor colorWithRed:1.0 green:0.91 blue:0.76 alpha:0.96]);
     giftAvatar.cornerRadius = 27.0;
     NSTextField *giftPaw = StatsLabel(NSMakeRect(10, 10, 34, 34), @"🎁",
                                       [NSFont systemFontOfSize:25.0], NSColor.labelColor);
     giftPaw.alignment = NSTextAlignmentCenter;
     [giftAvatar addSubview:giftPaw];
-    [_giftView addSubview:StatsLabel(NSMakeRect(98, 598, 360, 32), @"多涅的小箱子",
+    [_giftView addSubview:StatsLabel(NSMakeRect(98, 698, 360, 32), @"多涅的小箱子",
                                      [NSFont systemFontOfSize:26.0 weight:NSFontWeightBold], NSColor.labelColor)];
-    [_giftView addSubview:StatsLabel(NSMakeRect(99, 576, 360, 20), @"她坚称这些东西不是送给你的",
+    [_giftView addSubview:StatsLabel(NSMakeRect(99, 676, 360, 20), @"她坚称这些东西不是送给你的",
                                      [NSFont systemFontOfSize:13.0], NSColor.secondaryLabelColor)];
 
-    _giftSummaryLabel = StatsLabel(NSMakeRect(28, 452, 444, 30), @"—",
+    _giftSummaryLabel = StatsLabel(NSMakeRect(28, 552, 444, 30), @"—",
                                    [NSFont systemFontOfSize:17.0 weight:NSFontWeightSemibold], NSColor.labelColor);
     _giftSummaryLabel.alignment = NSTextAlignmentCenter;
     [_giftView addSubview:_giftSummaryLabel];
@@ -540,7 +683,7 @@ static NSTextField *AddTotalMetric(NSView *parent,
     [_giftView addSubview:StatsLabel(NSMakeRect(29, 51, 300, 18), @"🔒  收藏只留在这台 Mac 上",
                                      [NSFont systemFontOfSize:11.0], NSColor.tertiaryLabelColor)];
 
-    _sectionControl = [[NSSegmentedControl alloc] initWithFrame:NSMakeRect(160, 537, 180, 28)];
+    _sectionControl = [[NSSegmentedControl alloc] initWithFrame:NSMakeRect(160, 637, 180, 28)];
     _sectionControl.segmentCount = 2;
     [_sectionControl setLabel:@"小记" forSegment:0];
     [_sectionControl setLabel:@"小箱子" forSegment:1];
@@ -553,7 +696,6 @@ static NSTextField *AddTotalMetric(NSView *parent,
 }
 
 - (void)refresh {
-    [_stats save];
     _todayCompanionLabel.stringValue = FormatCompanionDuration(_stats.todayCompanionSeconds);
     _todayInteractionsLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.todayInteractions];
     _todayPounceLabel.stringValue = [NSString stringWithFormat:@"抓到 %ld · 扑空 %ld",
@@ -566,6 +708,11 @@ static NSTextField *AddTotalMetric(NSView *parent,
     _totalMissedLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalMissed];
     _totalHissLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalHisses];
     _totalSleepLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalSleeps];
+    _traitIndicators[@"vitality"].doubleValue = _stats.vitality;
+    _traitIndicators[@"temper"].doubleValue = _stats.temperValue;
+    _traitIndicators[@"boredom"].doubleValue = _stats.boredom;
+    _traitIndicators[@"pride"].doubleValue = _stats.pride;
+    _traitIndicators[@"closeness"].doubleValue = _stats.closeness;
     _giftSummaryLabel.stringValue = [NSString stringWithFormat:@"已发现 %ld / %ld · 共收藏 %ld 件",
                                      (long)_stats.discoveredGiftKinds,
                                      (long)GiftDefinitions().count,
@@ -623,7 +770,7 @@ static NSTextField *AddTotalMetric(NSView *parent,
 - (void)resetStats:(id)sender {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"要重置多涅小记吗？";
-    alert.informativeText = @"今天、累计记录和小箱子收藏都会清空，此操作无法撤销。";
+    alert.informativeText = @"今天、累计记录、当前状态和小箱子收藏都会清空，此操作无法撤销。";
     [alert addButtonWithTitle:@"取消"];
     [alert addButtonWithTitle:@"重置"];
     if ([alert runModal] != NSAlertSecondButtonReturn) return;
@@ -668,12 +815,23 @@ static NSAttributedString *HelpContent(void) {
     AppendHelpParagraph(text, @"•  多戳她几下：她可能会不耐烦\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  在她附近快速晃动鼠标：她可能会盯住并扑过去\n", [NSFont systemFontOfSize:14.0], 10.0, YES);
     AppendHelpParagraph(text, @"扑到鼠标后，她会露出得意脸；扑空则会生气哈气。\n", [NSFont systemFontOfSize:14.0], 18.0, NO);
+    AppendHelpParagraph(text, @"她偶尔会翻出一件小东西给你看，也可以从菜单选择“让她找找看”。\n", [NSFont systemFontOfSize:14.0], 18.0, NO);
 
     AppendHelpParagraph(text, @"睡觉与唤醒\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
     AppendHelpParagraph(text, @"一分钟没有和她互动后，她会在当前动作结束时睡着。普通的远距离鼠标移动不会打扰她。\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
     AppendHelpParagraph(text, @"•  点击或拖动她：立即醒来\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  鼠标重新靠近并短暂停留：慢慢醒来\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  菜单中的“让她睡觉 / 叫醒她”：手动切换睡眠\n", [NSFont systemFontOfSize:14.0], 10.0, YES);
+
+    AppendHelpParagraph(text, @"多涅小记\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
+    AppendHelpParagraph(text, @"小记会记下陪伴时间、互动、扑扑结果、哈气和睡觉次数，也会展示她当前的五项状态：\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
+    AppendHelpParagraph(text, @"•  活力：影响她愿不愿意做活泼的动作\n", [NSFont systemFontOfSize:14.0], 3.0, YES);
+    AppendHelpParagraph(text, @"•  脾气：受扑空、拖动和连续逗弄影响\n", [NSFont systemFontOfSize:14.0], 3.0, YES);
+    AppendHelpParagraph(text, @"•  无聊：一段时间没有互动时会慢慢升高\n", [NSFont systemFontOfSize:14.0], 3.0, YES);
+    AppendHelpParagraph(text, @"•  得意：扑到鼠标或翻到收藏时更容易升高\n", [NSFont systemFontOfSize:14.0], 3.0, YES);
+    AppendHelpParagraph(text, @"•  亲近：在日常陪伴中慢慢积累\n", [NSFont systemFontOfSize:14.0], 8.0, YES);
+    AppendHelpParagraph(text, @"这些状态会影响她的行动和扑击意愿。她偶尔冒出的傲娇颜文字，也会随当时的心情变化。\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
+    AppendHelpParagraph(text, @"“小箱子”会保存她找到的物品、收藏数量和首次发现日期。所有记录只保存在这台电脑上，不会上传。\n", [NSFont systemFontOfSize:14.0], 14.0, NO);
 
     AppendHelpParagraph(text, @"调整宠物\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
     AppendHelpParagraph(text, @"点击菜单栏的 🐾，或者右键桑多涅，可以：\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
@@ -716,7 +874,7 @@ static void ShowHelpWindow(void) {
         scrollView.hasVerticalScroller = YES;
         scrollView.drawsBackground = NO;
 
-        NSTextView *textView = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 520, 760)];
+        NSTextView *textView = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 520, 900)];
         textView.editable = NO;
         textView.selectable = YES;
         textView.drawsBackground = NO;
@@ -1159,11 +1317,24 @@ static void ShowHelpWindow(void) {
     PetStats *_stats;
     StatsWindowController *_statsWindowController;
     NSTimeInterval _lastStatsTickTime;
+    NSTimeInterval _lastStatsWindowRefreshTime;
     BOOL _giftActive;
     NSInteger _giftTick;
     NSInteger _giftReactionTicks;
     NSInteger _giftCooldownTicks;
     NSDictionary<NSString *, id> *_currentGift;
+    NSTimeInterval _lastEmojiAt;
+}
+
+- (void)useTickInterval:(NSTimeInterval)interval {
+    if (_timer.valid && fabs(_timer.timeInterval - interval) < 0.0001) return;
+    [_timer invalidate];
+    _timer = [NSTimer timerWithTimeInterval:interval
+                                     target:self
+                                   selector:@selector(tick:)
+                                   userInfo:nil
+                                    repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:_timer forMode:NSRunLoopCommonModes];
 }
 
 - (instancetype)initWithAtlas:(SpriteAtlas *)atlas {
@@ -1252,12 +1423,7 @@ static void ShowHelpWindow(void) {
     _lastInteractionTime = NSDate.timeIntervalSinceReferenceDate;
     _petIsVisible = NO;
     [self refreshVisibility];
-    _timer = [NSTimer timerWithTimeInterval:1.0 / 24.0
-                                     target:self
-                                   selector:@selector(tick:)
-                                   userInfo:nil
-                                    repeats:YES];
-    [NSRunLoop.mainRunLoop addTimer:_timer forMode:NSRunLoopCommonModes];
+    [self useTickInterval:kActiveTickInterval];
     return self;
 }
 
@@ -1330,22 +1496,28 @@ static void ShowHelpWindow(void) {
 
 - (void)triggerWave {
     [self noteInteraction];
+    [_stats applyTraitEvent:@"friendly"];
     [self cancelGiftPresentation];
     [self startWave];
 }
 - (void)startWave {
     [self cancelHunt];
+    [_stats applyTraitEvent:@"wave"];
     [self setMode:PetModeWaving ticks:90 loops:2];
+    NSString *speech = [self decoratedSpeech:@"多涅。" event:@"wave"];
+    if (![speech isEqualToString:@"多涅。"]) [self showSpeechText:speech duration:1.8];
 }
 - (void)triggerProud {
     [self noteInteraction];
     [self cancelGiftPresentation];
-    [self startProud];
+    [self startProudWithEvent:@"proud"];
 }
-- (void)startProud {
+- (void)startProud { [self startProudWithEvent:@"proud"]; }
+- (void)startProudWithEvent:(NSString *)event {
     [self cancelHunt];
+    [_stats applyTraitEvent:@"showOff"];
     [self setMode:PetModeProud ticks:90 loops:2];
-    [self showSpeechText:@"多涅多涅~" duration:1.8];
+    [self showSpeechText:[self decoratedSpeech:@"多涅多涅~" event:event] duration:1.8];
 }
 - (void)triggerJump {
     [self noteInteraction];
@@ -1354,6 +1526,7 @@ static void ShowHelpWindow(void) {
 }
 - (void)startJump {
     [self cancelHunt];
+    [_stats applyTraitEvent:@"jump"];
     if (_mode == PetModeJumping) {
         NSPoint origin = _panel.frame.origin;
         origin.y = _jumpBaseY;
@@ -1370,12 +1543,15 @@ static void ShowHelpWindow(void) {
 }
 - (void)triggerHiss {
     [self noteInteraction];
+    [_stats applyTraitEvent:@"irritated"];
     [self cancelGiftPresentation];
     [self startHissWithLoops:2];
 }
-- (void)startHissWithLoops:(NSInteger)loops {
+- (void)startHissWithLoops:(NSInteger)loops { [self startHissWithLoops:loops event:@"hiss"]; }
+- (void)startHissWithLoops:(NSInteger)loops event:(NSString *)event {
     [_stats recordHiss];
     [self cancelHunt];
+    [_stats applyTraitEvent:@"hiss"];
     if (_mode == PetModeHissing) {
         NSPoint origin = _panel.frame.origin;
         origin.x = _hissBaseX;
@@ -1384,7 +1560,8 @@ static void ShowHelpWindow(void) {
     _hissBaseX = _panel.frame.origin.x;
     _hissTick = 0;
     [self setMode:PetModeHissing ticks:90 loops:loops];
-    [self showSpeechText:@"哈?~~" duration:MAX(2.0, (NSTimeInterval)loops)];
+    [self showSpeechText:[self decoratedSpeech:@"哈?~~" event:event]
+                duration:MAX(2.0, (NSTimeInterval)loops)];
 }
 - (void)triggerWaiting { [self noteInteraction]; [self cancelGiftPresentation]; [self setMode:PetModeWaiting ticks:90 loops:2]; }
 - (void)triggerWorking { [self noteInteraction]; [self cancelGiftPresentation]; [self setMode:PetModeWorking ticks:90 loops:2]; }
@@ -1406,6 +1583,7 @@ static void ShowHelpWindow(void) {
     _giftTick = 0;
     _giftReactionTicks = 0;
     _giftCooldownTicks = 24 * 240;
+    [_stats applyTraitEvent:@"gift"];
     _giftBubbleView.giftImage = GiftImageForDefinition(gift);
     _giftBubbleView.giftScale = 0.35;
     _giftBubbleView.giftOpacity = 0.0;
@@ -1422,7 +1600,8 @@ static void ShowHelpWindow(void) {
     [self noteInteraction];
     [_stats recordInteraction];
     _giftReactionTicks = 32;
-    [self showSpeechText:@"多涅！💢" duration:1.7];
+    [_stats applyTraitEvent:@"giftTapped"];
+    [self showSpeechText:[self decoratedSpeech:@"多涅！" event:@"giftTapped"] duration:1.7];
 }
 
 - (void)cancelGiftPresentation {
@@ -1471,7 +1650,9 @@ static void ShowHelpWindow(void) {
         [self showRow:RowForMode(PetModeReview) column:(_giftTick / 5) % 6];
     } else {
         _view.currentFrame = [_atlas proudFrameAtColumn:(_giftTick / 5) % 6];
-        if (_giftTick == proudStartTick) [self showSpeechText:@"多涅。🎁" duration:2.0];
+        if (_giftTick == proudStartTick) {
+            [self showSpeechText:[self decoratedSpeech:@"多涅。🎁" event:@"giftProud"] duration:2.0];
+        }
     }
 
     if (_giftTick < totalTicks) return;
@@ -1513,6 +1694,7 @@ static void ShowHelpWindow(void) {
     NSPoint pointer = NSEvent.mouseLocation;
     _wakeProximityArmed = hypot(pointer.x - center.x, pointer.y - center.y) > [self sleepWakeRadius];
     [self setMode:PetModeSleeping ticks:NSIntegerMax loops:0];
+    [self useTickInterval:kSleepingTickInterval];
     [self showSpeechText:@"Zzz…" duration:2.2];
 }
 
@@ -1521,6 +1703,7 @@ static void ShowHelpWindow(void) {
     _sleeping = NO;
     _sleepRequested = NO;
     _wakeHoverTicks = 0;
+    [self useTickInterval:kActiveTickInterval];
     [_speechTimer invalidate];
     _speechTimer = nil;
     [_speechPanel orderOut:nil];
@@ -1537,11 +1720,11 @@ static void ShowHelpWindow(void) {
 
 - (void)tickSleeping {
     _frameClock += 1;
-    if (_frameClock >= 10) {
+    if (_frameClock >= 3) {
         _frameClock = 0;
         _frameIndex = (_frameIndex + 1) % FrameCountForMode(PetModeSleeping);
+        _view.currentFrame = [_atlas sleepFrameAtColumn:_frameIndex];
     }
-    _view.currentFrame = [_atlas sleepFrameAtColumn:_frameIndex];
 
     NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
     NSPoint pointer = NSEvent.mouseLocation;
@@ -1553,7 +1736,7 @@ static void ShowHelpWindow(void) {
     }
     if (distance <= radius) {
         _wakeHoverTicks += 1;
-        if (_wakeHoverTicks >= 20) {
+        if (_wakeHoverTicks >= 5) {
             _lastInteractionTime = NSDate.timeIntervalSinceReferenceDate;
             [self wakeFromSleep];
         }
@@ -1617,6 +1800,7 @@ static void ShowHelpWindow(void) {
     _dropping = NO;
     if (clickCount >= 2) {
         _pokeCount = 0;
+        [_stats applyTraitEvent:@"friendly"];
         [self triggerJump];
     } else if (clickCount == 1) {
         NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
@@ -1624,7 +1808,8 @@ static void ShowHelpWindow(void) {
         _lastPokeTime = now;
         if (_pokeCount >= 3) {
             _pokeCount = 0;
-            [self triggerHiss];
+            [_stats applyTraitEvent:@"repeatedPoke"];
+            [self startHissWithLoops:2 event:@"hiss"];
         } else {
             [self triggerWave];
         }
@@ -1637,6 +1822,7 @@ static void ShowHelpWindow(void) {
     [self setMode:PetModeIdle ticks:80 loops:0];
     _dropping = NO;
     _dragging = YES;
+    [_stats applyTraitEvent:@"drag"];
     _dragVisualTick = 0;
     [_speechTimer invalidate];
     _speechTimer = nil;
@@ -1688,7 +1874,7 @@ static void ShowHelpWindow(void) {
     _view.visualRotation = 0.0;
     _view.groundShadowOpacity = 0.0;
     _view.groundShadowScale = 1.0;
-    [self startHissWithLoops:2];
+    [self startHissWithLoops:2 event:@"drag"];
 }
 
 - (void)tick:(NSTimer *)timer {
@@ -1700,7 +1886,16 @@ static void ShowHelpWindow(void) {
     NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
     NSTimeInterval elapsed = now - _lastStatsTickTime;
     _lastStatsTickTime = now;
-    if (_petIsVisible) [_stats addVisibleSeconds:elapsed];
+    if (_petIsVisible) {
+        [_stats addVisibleSeconds:elapsed];
+        [_stats updateTraitsForElapsed:elapsed
+                             sleeping:_sleeping
+               secondsSinceInteraction:MAX(0.0, now - _lastInteractionTime)];
+        if (now - _lastStatsWindowRefreshTime >= 1.0) {
+            _lastStatsWindowRefreshTime = now;
+            [_statsWindowController refreshIfVisible];
+        }
+    }
     if (!_petIsVisible) return;
     if (_pointerHeld && !_dragging &&
         now - _pressStartedAt >= kDragLongPressDelay) [self beginLongPressDrag];
@@ -1876,8 +2071,19 @@ static void ShowHelpWindow(void) {
 
     CGFloat threshold = 10.5;
     if (_lureScore >= threshold) {
-        [self noteInteraction];
-        [self beginHuntAt:pointer];
+        _lureScore = 0.0;
+        CGFloat v = _stats.vitality / 100.0;
+        CGFloat a = _stats.temperValue / 100.0;
+        CGFloat b = _stats.boredom / 100.0;
+        CGFloat c = _stats.closeness / 100.0;
+        CGFloat willingness = MAX(0.12, MIN(0.85, 0.10 + 0.40 * v + 0.25 * b + 0.15 * c - 0.25 * a));
+        if (RandomUnit() <= willingness) {
+            [self noteInteraction];
+            [self beginHuntAt:pointer];
+        } else {
+            _huntCooldownTicks = 48;
+            if (_stats.temperValue >= 70.0 && RandomUnit() < 0.25) [self startHissWithLoops:2];
+        }
     }
 }
 
@@ -1960,10 +2166,12 @@ static void ShowHelpWindow(void) {
                           verticalMiss < _panel.frame.size.height * 1.35;
             if (caught) {
                 [_stats recordCaught];
-                [self startProud];
+                [_stats applyTraitEvent:@"caught"];
+                [self startProudWithEvent:@"caught"];
             } else {
                 [_stats recordMissed];
-                [self startHissWithLoops:2];
+                [_stats applyTraitEvent:@"missed"];
+                [self startHissWithLoops:2 event:@"missed"];
             }
         } else {
             [self chooseNextRoamPhase];
@@ -2009,12 +2217,36 @@ static void ShowHelpWindow(void) {
         return;
     }
 
-    NSInteger roll = RandomBetween(0, 99);
-    if (roll < 25) [self startTimedIdle];
-    else if (roll < 45) [self setMode:PetModeWalkRight ticks:RandomBetween(72, 120) loops:0];
-    else if (roll < 65) [self setMode:PetModeWalkLeft ticks:RandomBetween(72, 120) loops:0];
-    else if (roll < 80) [self startWave];
-    else if (roll < 90) [self startJump];
+    CGFloat v = _stats.vitality / 100.0;
+    CGFloat a = _stats.temperValue / 100.0;
+    CGFloat b = _stats.boredom / 100.0;
+    CGFloat p = _stats.pride / 100.0;
+    CGFloat c = _stats.closeness / 100.0;
+    CGFloat livelyIdle = _activityLevel == PetActivityLevelLively ? 0.72 : 1.0;
+    NSArray<NSString *> *actions = @[@"idle", @"right", @"left", @"wave", @"jump", @"hiss"];
+    NSArray<NSNumber *> *weights = @[
+        @(25.0 * (1.25 - 0.55 * v) * (1.15 - 0.35 * b) * livelyIdle),
+        @(20.0 * (0.35 + 0.65 * v) * (0.55 + 0.45 * b)),
+        @(20.0 * (0.35 + 0.65 * v) * (0.55 + 0.45 * b)),
+        @(15.0 * (0.25 + 0.45 * c + 0.30 * b) * (1.0 - 0.35 * a)),
+        @(10.0 * (0.15 + 0.85 * v) * (0.65 + 0.35 * p)),
+        @(10.0 * (0.15 + 0.85 * a) * (0.75 + 0.25 * b))
+    ];
+    CGFloat total = 0.0;
+    for (NSNumber *weight in weights) total += weight.doubleValue;
+    CGFloat roll = RandomUnit() * total;
+    NSString *action = actions.firstObject;
+    for (NSInteger index = 0; index < (NSInteger)actions.count; index++) {
+        roll -= weights[index].doubleValue;
+        if (roll < 0.0) { action = actions[index]; break; }
+    }
+    if ([action isEqualToString:@"idle"]) [self startTimedIdle];
+    else if ([action isEqualToString:@"right"] || [action isEqualToString:@"left"]) {
+        [_stats applyTraitEvent:@"walk"];
+        [self setMode:[action isEqualToString:@"right"] ? PetModeWalkRight : PetModeWalkLeft
+                ticks:RandomBetween(72, 120) loops:0];
+    } else if ([action isEqualToString:@"wave"]) [self startWave];
+    else if ([action isEqualToString:@"jump"]) [self startJump];
     else [self startHissWithLoops:2];
 }
 
@@ -2070,6 +2302,48 @@ static void ShowHelpWindow(void) {
 
 - (void)showRow:(NSInteger)row column:(NSInteger)column {
     _view.currentFrame = [_atlas frameAtRow:row column:column];
+}
+
+- (NSString *)decoratedSpeech:(NSString *)base event:(NSString *)event {
+    NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
+    if (now - _lastEmojiAt < 30.0) return base;
+    CGFloat a = _stats.temperValue / 100.0;
+    CGFloat p = _stats.pride / 100.0;
+    CGFloat c = _stats.closeness / 100.0;
+    NSMutableArray<NSDictionary<NSString *, id> *> *candidates = [NSMutableArray array];
+    if ([@[@"hiss", @"missed", @"drag", @"giftTapped"] containsObject:event]) {
+        [candidates addObject:@{@"score": @(MAX(0.08, a)),
+                                @"emoji": a > 0.68 ? @"(￣ヘ￣)" : @"( •̀ ᴖ •́ )"}];
+    }
+    if ([@[@"proud", @"caught", @"giftProud"] containsObject:event]) {
+        [candidates addObject:@{@"score": @(MAX(0.08, p)), @"emoji": @"(￣︶￣)✨"}];
+        [candidates addObject:@{@"score": @(MAX(0.05, c * p * 0.55)), @"emoji": @"(˘^˘)"}];
+    }
+    if ([event isEqualToString:@"wave"]) {
+        [candidates addObject:@{@"score": @(MAX(0.05, c * (0.55 * p + 0.45 * (1.0 - a)))),
+                                @"emoji": @"(￣^￣)ノ"}];
+        [candidates addObject:@{@"score": @(MAX(0.02, c * (1.0 - a) * 0.16)),
+                                @"emoji": @"(⁄ ⁄•⁄-⁄•⁄ ⁄)"}];
+    }
+    if (candidates.count == 0) return base;
+    CGFloat strongest = 0.0;
+    CGFloat total = 0.0;
+    for (NSDictionary *candidate in candidates) {
+        CGFloat score = [candidate[@"score"] doubleValue];
+        strongest = MAX(strongest, score);
+        total += score;
+    }
+    BOOL strongEvent = [@[@"hiss", @"missed", @"drag", @"caught"] containsObject:event];
+    CGFloat probability = MIN(0.70, 0.05 + strongest * 0.55 + (strongEvent ? 0.10 : 0.0));
+    if (RandomUnit() >= probability) return base;
+    CGFloat roll = RandomUnit() * total;
+    NSDictionary *selected = candidates.firstObject;
+    for (NSDictionary *candidate in candidates) {
+        roll -= [candidate[@"score"] doubleValue];
+        if (roll < 0.0) { selected = candidate; break; }
+    }
+    _lastEmojiAt = now;
+    return [NSString stringWithFormat:@"%@ %@", base, selected[@"emoji"]];
 }
 
 - (void)showSpeechText:(NSString *)text duration:(NSTimeInterval)duration {

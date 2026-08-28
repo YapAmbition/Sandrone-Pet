@@ -1,4 +1,4 @@
-import { PetEngine, TICK_MS } from './engine.mjs';
+import { PetEngine } from './engine.mjs';
 
 const canvas = document.querySelector('#pet');
 const context = canvas.getContext('2d', { alpha: true });
@@ -60,6 +60,7 @@ const engine = new PetEngine({
   speech: (text, duration) => window.petAPI.showSpeech(text, duration),
   hideSpeech: () => window.petAPI.hideSpeech(),
   record: (metric) => window.petAPI.record(metric),
+  mood: (traits) => window.petAPI.saveMood(traits),
   gift: (presentation) => window.petAPI.gift(presentation),
   savePosition: () => window.petAPI.savePosition(),
   publish: (state) => window.petAPI.publishState(state)
@@ -121,6 +122,7 @@ window.petAPI.onCommand((command) => {
   if (command.type === 'action') engine.trigger(command.value);
   else if (command.type === 'giftTap') engine.giftTapped();
   else if (command.type === 'settings') engine.applySettings(command.value);
+  else if (command.type === 'traits') engine.replaceTraits(command.value);
   else if (command.type === 'visibility') engine.updateEnvironment({ visible: command.value });
   else if (command.type === 'interaction') engine.noteInteraction();
 });
@@ -139,7 +141,11 @@ async function start() {
   atlas.drag = drag;
   engine.initialize(initial);
   window.petAPI.rendererReady();
-  setInterval(() => engine.tick(), TICK_MS);
+  const scheduleTick = () => {
+    engine.tick();
+    setTimeout(scheduleTick, engine.tickIntervalMs());
+  };
+  setTimeout(scheduleTick, engine.tickIntervalMs());
 }
 
 start().catch((error) => console.error('Unable to start pet renderer', error));

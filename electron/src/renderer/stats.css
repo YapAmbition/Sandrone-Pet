@@ -34,6 +34,20 @@ small { display: block; color: #77727a; font-size: 12px; font-weight: 650; margi
 strong { display: block; color: #444147; font-size: 20px; line-height: 1.2; }
 .companion strong { font-size: 25px; }
 h2 { margin: 20px 4px 10px; font-size: 17px; }
+.traits {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px 22px; padding: 16px 20px;
+  background: #eee9f1;
+}
+.trait { display: grid; grid-template-columns: 62px 1fr; gap: 9px; align-items: center; }
+.trait:last-child { grid-column: 1 / -1; }
+.trait > span { color: #666168; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.trait-track { height: 8px; overflow: hidden; border-radius: 999px; background: #d7d2da; }
+.trait-track i { display: block; width: 0; height: 100%; border-radius: inherit; transition: width 240ms ease; }
+.vitality i { background: #e6a83a; }
+.temper i { background: #d95a61; }
+.boredom i { background: #6f9cc7; }
+.pride i { background: #a36bc0; }
+.closeness i { background: #d77fa2; }
 .today-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .metric {
   min-height: 70px; padding: 12px 16px; border-radius: 15px; display: flex; align-items: center; gap: 13px;
@@ -78,6 +92,9 @@ button:hover { background: #d8d8db; }
   header p, small { color: #aaa4ad; }
   strong { color: #f2edf3; }
   .companion { background: #3f3044; }
+  .traits { background: #35313a; }
+  .trait > span { color: #cbc4ce; }
+  .trait-track { background: #504a54; }
   .blue { background: #29374d; }
   .orange { background: #493a2d; }
   .red { background: #4b3031; }

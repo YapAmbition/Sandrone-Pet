@@ -9,6 +9,12 @@ function duration(seconds) {
 
 function count(value) { return `${Math.floor(value || 0)} 次`; }
 function set(id, value) { document.querySelector(`#${id}`).textContent = value; }
+function setTrait(name, value) {
+  const bar = document.querySelector(`#trait-${name}`);
+  const amount = Math.max(0, Math.min(100, Number(value) || 0));
+  bar.style.width = `${amount}%`;
+  bar.parentElement.setAttribute('aria-label', `${Math.round(amount)}%`);
+}
 
 function giftTotal(counts) {
   return Object.values(counts || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
@@ -78,6 +84,12 @@ async function refresh() {
   set('total-missed', count(total.missed));
   set('total-hisses', count(total.hisses));
   set('total-sleeps', count(total.sleeps));
+  const traits = snapshot.traits || {};
+  setTrait('vitality', traits.vitality);
+  setTrait('temper', traits.temper);
+  setTrait('boredom', traits.boredom);
+  setTrait('pride', traits.pride);
+  setTrait('closeness', traits.closeness);
   renderGifts(snapshot);
 }
 
