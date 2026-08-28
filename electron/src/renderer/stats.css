@@ -73,8 +73,8 @@ button:hover { background: #d8d8db; }
 
 @media (prefers-color-scheme: dark) {
   :root { color: #eee9ef; background: #222124; }
-  .avatar { background: #4a354f; }
-  .avatar.gift-avatar { background: #57472f; }
+  .avatar { background: #eddcf2; }
+  .avatar.gift-avatar { background: #f8dfb4; }
   header p, small { color: #aaa4ad; }
   strong { color: #f2edf3; }
   .companion { background: #3f3044; }
