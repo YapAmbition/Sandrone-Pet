@@ -282,7 +282,7 @@ function handleGiftPresentation(presentation) {
     const gift = GIFTS.find((item) => item.id === presentation.gift?.id);
     if (!gift) return;
     activeGift = gift;
-    stats.recordGift(gift.id);
+    if (presentation.record !== false) stats.recordGift(gift.id);
     statsWindow?.webContents.send('stats:changed');
     resizeGiftWindow();
     positionGiftWindow();
@@ -663,8 +663,13 @@ function registerIpc() {
   ipcMain.on('gift:presentation', (_event, presentation) => handleGiftPresentation(presentation));
   ipcMain.on('gift:tapped', () => command('giftTap'));
   ipcMain.on('menu:context', () => Menu.buildFromTemplate(petContextMenuTemplate()).popup({ window: petWindow }));
-  ipcMain.on('stats:record', (_event, metric) => {
-    stats.add(metric, 1);
+  ipcMain.on('stats:record', (_event, payload) => {
+    const metric = typeof payload === 'string' ? payload : payload?.metric;
+    const amount = typeof payload === 'string' ? 1 : Number(payload?.amount);
+    if (metric === 'pettingAccepted') stats.recordPetting(true);
+    else if (metric === 'pettingRejected') stats.recordPetting(false);
+    else if (metric === 'guidedWalk') stats.recordGuidedWalk(amount);
+    else stats.add(metric, Number.isFinite(amount) ? amount : 1);
     statsWindow?.webContents.send('stats:changed');
   });
   ipcMain.on('mood:update', (_event, traits) => {
@@ -679,9 +684,17 @@ function registerIpc() {
     })),
     seenGiftCount: Number(store.get('seenGiftCount')) || 0
   }));
+  ipcMain.handle('stats:give-gift', (_event, identifier) => {
+    const gift = GIFTS.find((item) => item.id === identifier);
+    if (!gift || ['dragging', 'dropping'].includes(latestPetState.mode) || !stats.consumeGift(identifier)) return false;
+    command('giveGift', identifier);
+    statsWindow?.webContents.send('stats:changed');
+    return true;
+  });
   ipcMain.on('stats:mark-gifts-seen', () => {
     const snapshot = stats.snapshot();
-    const total = Object.values(snapshot.gifts.counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
+    const total = Object.values(snapshot.gifts.totalFound || snapshot.gifts.counts)
+      .reduce((sum, value) => sum + (Number(value) || 0), 0);
     store.set('seenGiftCount', total);
   });
   ipcMain.handle('stats:reset', async () => {

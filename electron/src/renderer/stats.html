@@ -16,6 +16,7 @@
 
     <nav class="tabs" aria-label="多涅小记页面">
       <button class="tab active" data-page="journal">小记</button>
+      <button class="tab" data-page="memory">回忆</button>
       <button class="tab" data-page="gifts">小箱子 <span id="gift-sparkle" hidden>✨</span></button>
     </nav>
 
@@ -25,7 +26,7 @@
         <div><small>今天的陪伴</small><strong id="today-companion">—</strong></div>
       </section>
 
-      <h2>现在的多涅</h2>
+      <div class="section-heading"><h2>现在的多涅</h2><button class="trait-help-button" title="属性说明" aria-label="属性说明">ⓘ</button></div>
       <section class="traits card" aria-label="多涅的当前状态">
         <div class="trait vitality"><span>⚡ 活力</span><div class="trait-track"><i id="trait-vitality"></i></div></div>
         <div class="trait temper"><span>💢 脾气</span><div class="trait-track"><i id="trait-temper"></i></div></div>
@@ -36,31 +37,74 @@
 
       <h2>今天发生了什么</h2>
       <section class="today-grid">
-        <article class="metric blue"><span>🐾</span><div><small>互动</small><strong id="today-interactions">—</strong></div></article>
+        <article class="metric blue"><span>♡</span><div><small>摸摸记录</small><strong id="today-petting">—</strong></div></article>
         <article class="metric orange"><span>⚡</span><div><small>扑扑记录</small><strong id="today-pounce">—</strong></div></article>
         <article class="metric red"><span>💢</span><div><small>哈气</small><strong id="today-hisses">—</strong></div></article>
         <article class="metric indigo"><span>☾</span><div><small>睡觉</small><strong id="today-sleeps">—</strong></div></article>
       </section>
 
-      <h2>从相遇到现在</h2>
-      <section class="totals card">
-        <div><small>陪伴时间</small><strong id="total-companion">—</strong></div>
-        <div><small>互动</small><strong id="total-interactions">—</strong></div>
-        <div><small>抓到鼠标</small><strong id="total-caught">—</strong></div>
-        <div><small>扑了个空</small><strong id="total-missed">—</strong></div>
-        <div><small>哈气</small><strong id="total-hisses">—</strong></div>
-        <div><small>睡觉</small><strong id="total-sleeps">—</strong></div>
+      <h2>今日小习惯</h2>
+      <section class="summary-strip card">
+        <div><small>摸头默许率</small><strong id="today-permission-rate">—</strong></div>
+        <div><small>扑击命中率</small><strong id="today-pounce-accuracy">—</strong></div>
+        <div><small>平均跟随</small><strong id="today-guided-average">—</strong></div>
       </section>
 
       <footer><span>🔒 记录只留在这台电脑上</span><button id="reset">清空记录…</button></footer>
     </section>
 
+    <section class="page" id="memory-page">
+      <section class="memory-hero card">
+        <span class="heart">♡</span>
+        <div class="memory-hero-main"><small>总陪伴时间</small><strong id="total-companion">—</strong></div>
+        <span class="memory-hero-equivalent" id="total-companion-equivalent">—</span>
+      </section>
+      <div class="lifetime-heading"><h2>她的小习惯</h2><span>累计统计</span></div>
+      <section class="memory-grid">
+        <article class="memory-card pink"><span>♡</span><div><small>摸头</small><strong id="total-petting">—</strong><em id="total-petting-equivalent">—</em></div></article>
+        <article class="memory-card blue"><span>🐾</span><div><small>摸头反应</small><strong id="total-permission">—</strong><em id="total-permission-equivalent">—</em></div></article>
+        <article class="memory-card orange"><span>⚡</span><div><small>扑扑记录</small><strong id="total-pounce">—</strong><em id="total-pounce-equivalent">—</em></div></article>
+        <article class="memory-card teal"><span>↝</span><div><small>跟着走</small><strong id="total-guided">—</strong><em id="total-guided-equivalent">—</em></div></article>
+        <article class="memory-card red"><span>💢</span><div><small>哈气</small><strong id="total-hisses">—</strong><em id="total-hisses-equivalent">—</em></div></article>
+        <article class="memory-card indigo"><span>☾</span><div><small>睡觉</small><strong id="total-sleeps">—</strong><em id="total-sleeps-equivalent">—</em></div></article>
+      </section>
+      <h2>累计总览</h2>
+      <section class="summary-strip card memory-summary">
+        <div><small>总互动</small><strong id="total-interactions">—</strong></div>
+        <div><small>找到物品</small><strong id="total-found-gifts">—</strong></div>
+        <div><small>发现种类</small><strong id="total-gift-kinds">—</strong></div>
+      </section>
+      <footer class="memory-footer"><span>🔒 回忆只留在这台电脑上</span></footer>
+    </section>
+
     <section class="page" id="gifts-page">
       <p class="gift-summary" id="gift-summary">已发现 0 / 4 · 共收藏 0 件</p>
+      <div class="section-heading gift-trait-title"><h2>现在的多涅</h2><button class="trait-help-button" title="属性说明" aria-label="属性说明">ⓘ</button></div>
+      <section class="traits card gift-traits" aria-label="送礼前多涅的当前状态">
+        <div class="trait vitality"><span>⚡ 活力</span><div class="trait-track"><i id="gift-trait-vitality"></i></div></div>
+        <div class="trait temper"><span>💢 脾气</span><div class="trait-track"><i id="gift-trait-temper"></i></div></div>
+        <div class="trait boredom"><span>🧶 无聊</span><div class="trait-track"><i id="gift-trait-boredom"></i></div></div>
+        <div class="trait pride"><span>👑 得意</span><div class="trait-track"><i id="gift-trait-pride"></i></div></div>
+        <div class="trait closeness"><span>🤍 亲近</span><div class="trait-track"><i id="gift-trait-closeness"></i></div></div>
+      </section>
+      <p class="gift-use-hint">会消耗 1 件，并影响多涅当前的状态。</p>
       <section class="gift-grid" id="gift-grid"></section>
       <footer class="gift-footer"><span>🔒 收藏只留在这台电脑上</span></footer>
     </section>
   </main>
+  <dialog id="trait-help-dialog" aria-labelledby="trait-help-title">
+    <div class="dialog-heading">
+      <h2 id="trait-help-title">属性会怎样影响多涅？</h2>
+      <button id="trait-help-close" aria-label="关闭">×</button>
+    </div>
+    <ul class="trait-explanations">
+      <li><b>⚡ 活力</b><span>越高越爱散步、跳跃，也更愿意扑鼠标</span></li>
+      <li><b>💢 脾气</b><span>越高越容易哈气、拒绝摸头，也更不愿意扑鼠标</span></li>
+      <li><b>🧶 无聊</b><span>越高越容易主动走动、挥爪和扑鼠标</span></li>
+      <li><b>👑 得意</b><span>越高越爱跳，也更容易露出傲娇反应</span></li>
+      <li><b>🤍 亲近</b><span>越高越愿意回应、扑鼠标和接受摸头</span></li>
+    </ul>
+  </dialog>
   <script src="stats.js"></script>
 </body>
 </html>

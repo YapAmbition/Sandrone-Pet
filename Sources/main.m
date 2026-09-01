@@ -40,6 +40,9 @@ static const NSTimeInterval kActiveTickInterval = 1.0 / 24.0;
 static const NSTimeInterval kSleepingTickInterval = 1.0 / 6.0;
 static const NSInteger kDragLiftTicks = 7;
 static const NSInteger kDragDropTicks = 8;
+static const NSInteger kTurnAwayTicks = 72;
+static const NSInteger kGlanceBackTicks = 24;
+static const NSInteger kTurnDirectionFrameTicks = 2;
 
 static NSInteger RowForMode(PetMode mode) { return mode == PetModeProud ? 6 : (NSInteger)mode; }
 
@@ -93,13 +96,17 @@ static NSArray<NSDictionary<NSString *, id> *> *GiftDefinitions(void) {
     dispatch_once(&onceToken, ^{
         definitions = @[
             @{@"id": @"screw", @"name": @"黄铜发条钥匙", @"asset": @"winding-key.png", @"weight": @40,
-              @"note": @"被擦得亮晶晶的。多涅坚称只是顺手捡到。"},
+              @"note": @"被擦得亮晶晶的。多涅坚称只是顺手捡到。",
+              @"effect": @"⚡ 活力大幅↑ · 🧶 无聊微升\n🤍 亲近微升"},
             @{@"id": @"feather", @"name": @"黑金蝴蝶结", @"asset": @"black-gold-bow.png", @"weight": @30,
-              @"note": @"端庄又可爱，和某位傲娇淑女十分相配。"},
+              @"note": @"端庄又可爱，和某位傲娇淑女十分相配。",
+              @"effect": @"👑 得意大幅↑ · ⚡ 活力下降\n🤍 亲近微升"},
             @{@"id": @"gear", @"name": @"齿轮蔷薇", @"asset": @"clockwork-rose.png", @"weight": @22,
-              @"note": @"花瓣会在光下微微转动，她似乎很中意。"},
+              @"note": @"花瓣会在光下微微转动，她似乎很中意。",
+              @"effect": @"🧶 无聊大幅↓ · 💢 脾气下降\n🤍 亲近微升"},
             @{@"id": @"ruby", @"name": @"红宝石胸针", @"asset": @"ruby-brooch.png", @"weight": @8,
-              @"note": @"罕见的闪亮收藏。她展示时明显格外得意。"}
+              @"note": @"罕见的闪亮收藏。她展示时明显格外得意。",
+              @"effect": @"💢 脾气上升 · 👑 得意下降\n🤍 亲近微升"}
         ];
     });
     return definitions;
@@ -144,7 +151,20 @@ static NSDictionary<NSString *, id> *RandomGiftDefinition(void) {
 @property(nonatomic, readonly) NSInteger totalHisses;
 @property(nonatomic, readonly) NSInteger todaySleeps;
 @property(nonatomic, readonly) NSInteger totalSleeps;
+@property(nonatomic, readonly) NSInteger todayPettings;
+@property(nonatomic, readonly) NSInteger totalPettings;
+@property(nonatomic, readonly) NSInteger todayPettingAccepted;
+@property(nonatomic, readonly) NSInteger totalPettingAccepted;
+@property(nonatomic, readonly) NSInteger todayPettingRejected;
+@property(nonatomic, readonly) NSInteger totalPettingRejected;
+@property(nonatomic, readonly) NSInteger todayBestPettingStreak;
+@property(nonatomic, readonly) NSInteger totalBestPettingStreak;
+@property(nonatomic, readonly) NSInteger todayGuidedWalks;
+@property(nonatomic, readonly) NSInteger totalGuidedWalks;
+@property(nonatomic, readonly) CGFloat todayGuidedBodyLengths;
+@property(nonatomic, readonly) CGFloat totalGuidedBodyLengths;
 @property(nonatomic, readonly) NSInteger totalGifts;
+@property(nonatomic, readonly) NSInteger totalFoundGifts;
 @property(nonatomic, readonly) NSInteger discoveredGiftKinds;
 @property(nonatomic, readonly) CGFloat vitality;
 @property(nonatomic, readonly) CGFloat temperValue;
@@ -157,7 +177,10 @@ static NSDictionary<NSString *, id> *RandomGiftDefinition(void) {
 - (void)recordMissed;
 - (void)recordHiss;
 - (void)recordSleep;
+- (void)recordPettingAccepted:(BOOL)accepted;
+- (void)recordGuidedWalkBodyLengths:(CGFloat)bodyLengths;
 - (void)recordGiftWithIdentifier:(NSString *)identifier;
+- (BOOL)consumeGiftAndApplyEffectWithIdentifier:(NSString *)identifier;
 - (void)applyTraitEvent:(NSString *)event;
 - (void)updateTraitsForElapsed:(NSTimeInterval)elapsed
                      sleeping:(BOOL)sleeping
@@ -191,7 +214,22 @@ static NSString *CurrentStatsDayKey(void) {
     NSInteger _totalHisses;
     NSInteger _todaySleeps;
     NSInteger _totalSleeps;
+    NSInteger _todayPettings;
+    NSInteger _totalPettings;
+    NSInteger _todayPettingAccepted;
+    NSInteger _totalPettingAccepted;
+    NSInteger _todayPettingRejected;
+    NSInteger _totalPettingRejected;
+    NSInteger _todayPettingStreak;
+    NSInteger _totalPettingStreak;
+    NSInteger _todayBestPettingStreak;
+    NSInteger _totalBestPettingStreak;
+    NSInteger _todayGuidedWalks;
+    NSInteger _totalGuidedWalks;
+    CGFloat _todayGuidedBodyLengths;
+    CGFloat _totalGuidedBodyLengths;
     NSMutableDictionary<NSString *, NSNumber *> *_giftCounts;
+    NSMutableDictionary<NSString *, NSNumber *> *_giftTotalFound;
     NSMutableDictionary<NSString *, NSDate *> *_giftFirstFoundDates;
     NSTimeInterval _secondsSinceSave;
     CGFloat _vitality;
@@ -220,7 +258,22 @@ static NSString *CurrentStatsDayKey(void) {
     _totalHisses = [defaults integerForKey:@"statsTotalHisses"];
     _todaySleeps = [defaults integerForKey:@"statsTodaySleeps"];
     _totalSleeps = [defaults integerForKey:@"statsTotalSleeps"];
+    _todayPettings = [defaults integerForKey:@"statsTodayPettings"];
+    _totalPettings = [defaults integerForKey:@"statsTotalPettings"];
+    _todayPettingAccepted = [defaults integerForKey:@"statsTodayPettingAccepted"];
+    _totalPettingAccepted = [defaults integerForKey:@"statsTotalPettingAccepted"];
+    _todayPettingRejected = [defaults integerForKey:@"statsTodayPettingRejected"];
+    _totalPettingRejected = [defaults integerForKey:@"statsTotalPettingRejected"];
+    _todayPettingStreak = [defaults integerForKey:@"statsTodayPettingStreak"];
+    _totalPettingStreak = [defaults integerForKey:@"statsTotalPettingStreak"];
+    _todayBestPettingStreak = [defaults integerForKey:@"statsTodayBestPettingStreak"];
+    _totalBestPettingStreak = [defaults integerForKey:@"statsTotalBestPettingStreak"];
+    _todayGuidedWalks = [defaults integerForKey:@"statsTodayGuidedWalks"];
+    _totalGuidedWalks = [defaults integerForKey:@"statsTotalGuidedWalks"];
+    _todayGuidedBodyLengths = [defaults doubleForKey:@"statsTodayGuidedBodyLengths"];
+    _totalGuidedBodyLengths = [defaults doubleForKey:@"statsTotalGuidedBodyLengths"];
     _giftCounts = [[defaults dictionaryForKey:@"giftCounts"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    _giftTotalFound = [[defaults dictionaryForKey:@"giftTotalFound"] mutableCopy] ?: [_giftCounts mutableCopy];
     _giftFirstFoundDates = [[defaults dictionaryForKey:@"giftFirstFoundDates"] mutableCopy] ?: [NSMutableDictionary dictionary];
     _vitality = [defaults objectForKey:@"traitVitality"] ? [defaults doubleForKey:@"traitVitality"] : 68.0;
     _temperValue = [defaults objectForKey:@"traitTemper"] ? [defaults doubleForKey:@"traitTemper"] : 22.0;
@@ -243,6 +296,13 @@ static NSString *CurrentStatsDayKey(void) {
     _todayMissed = 0;
     _todayHisses = 0;
     _todaySleeps = 0;
+    _todayPettings = 0;
+    _todayPettingAccepted = 0;
+    _todayPettingRejected = 0;
+    _todayPettingStreak = 0;
+    _todayBestPettingStreak = 0;
+    _todayGuidedWalks = 0;
+    _todayGuidedBodyLengths = 0.0;
     [self save];
 }
 
@@ -258,12 +318,29 @@ static NSString *CurrentStatsDayKey(void) {
 - (NSInteger)totalHisses { return _totalHisses; }
 - (NSInteger)todaySleeps { [self ensureCurrentDay]; return _todaySleeps; }
 - (NSInteger)totalSleeps { return _totalSleeps; }
+- (NSInteger)todayPettings { [self ensureCurrentDay]; return _todayPettings; }
+- (NSInteger)totalPettings { return _totalPettings; }
+- (NSInteger)todayPettingAccepted { [self ensureCurrentDay]; return _todayPettingAccepted; }
+- (NSInteger)totalPettingAccepted { return _totalPettingAccepted; }
+- (NSInteger)todayPettingRejected { [self ensureCurrentDay]; return _todayPettingRejected; }
+- (NSInteger)totalPettingRejected { return _totalPettingRejected; }
+- (NSInteger)todayBestPettingStreak { [self ensureCurrentDay]; return _todayBestPettingStreak; }
+- (NSInteger)totalBestPettingStreak { return _totalBestPettingStreak; }
+- (NSInteger)todayGuidedWalks { [self ensureCurrentDay]; return _todayGuidedWalks; }
+- (NSInteger)totalGuidedWalks { return _totalGuidedWalks; }
+- (CGFloat)todayGuidedBodyLengths { [self ensureCurrentDay]; return _todayGuidedBodyLengths; }
+- (CGFloat)totalGuidedBodyLengths { return _totalGuidedBodyLengths; }
 - (NSInteger)totalGifts {
     NSInteger total = 0;
     for (NSNumber *count in _giftCounts.allValues) total += count.integerValue;
     return total;
 }
-- (NSInteger)discoveredGiftKinds { return _giftCounts.count; }
+- (NSInteger)totalFoundGifts {
+    NSInteger total = 0;
+    for (NSNumber *count in _giftTotalFound.allValues) total += count.integerValue;
+    return total;
+}
+- (NSInteger)discoveredGiftKinds { return _giftFirstFoundDates.count; }
 - (CGFloat)vitality { return _vitality; }
 - (CGFloat)temperValue { return _temperValue; }
 - (CGFloat)boredom { return _boredom; }
@@ -271,16 +348,8 @@ static NSString *CurrentStatsDayKey(void) {
 - (CGFloat)closeness { return _closeness; }
 
 - (void)addCloseness:(CGFloat)requested {
-    NSString *today = CurrentStatsDayKey();
-    if (![_closenessDay isEqualToString:today]) {
-        _closenessDay = today;
-        _closenessGainToday = 0.0;
-    }
-    CGFloat granted = MIN(MAX(0.0, requested), MAX(0.0, 2.0 - _closenessGainToday));
-    if (granted <= 0.0) return;
-    CGFloat before = _closeness;
-    _closeness = BoundedTraitChange(_closeness, granted);
-    _closenessGainToday += _closeness - before;
+    if (requested <= 0.0) return;
+    _closeness = BoundedTraitChange(_closeness, requested);
 }
 
 - (void)applyTraitEvent:(NSString *)event {
@@ -296,6 +365,7 @@ static NSString *CurrentStatsDayKey(void) {
         @"missed": @{@"vitality": @-5, @"boredom": @-6, @"pride": @-8, @"temper": @8},
         @"gift": @{@"boredom": @-6, @"pride": @8},
         @"giftTapped": @{@"temper": @8, @"boredom": @-2},
+        @"petted": @{@"temper": @-3, @"boredom": @-7},
         @"showOff": @{@"pride": @-3},
         @"friendly": @{@"boredom": @-6}
     };
@@ -305,6 +375,7 @@ static NSString *CurrentStatsDayKey(void) {
     if (deltas[@"boredom"]) _boredom = BoundedTraitChange(_boredom, deltas[@"boredom"].doubleValue);
     if (deltas[@"pride"]) _pride = BoundedTraitChange(_pride, deltas[@"pride"].doubleValue);
     if ([event isEqualToString:@"friendly"]) [self addCloseness:0.35];
+    else if ([event isEqualToString:@"petted"]) [self addCloseness:0.25];
     else if ([event isEqualToString:@"caught"] || [event isEqualToString:@"gift"]) [self addCloseness:0.20];
 }
 
@@ -338,12 +409,62 @@ static NSString *CurrentStatsDayKey(void) {
 - (void)recordMissed { [self ensureCurrentDay]; _todayMissed += 1; _totalMissed += 1; [self save]; }
 - (void)recordHiss { [self ensureCurrentDay]; _todayHisses += 1; _totalHisses += 1; [self save]; }
 - (void)recordSleep { [self ensureCurrentDay]; _todaySleeps += 1; _totalSleeps += 1; [self save]; }
+- (void)recordPettingAccepted:(BOOL)accepted {
+    [self ensureCurrentDay];
+    _todayPettings += 1;
+    _totalPettings += 1;
+    if (accepted) {
+        _todayPettingAccepted += 1;
+        _totalPettingAccepted += 1;
+        _todayPettingStreak += 1;
+        _totalPettingStreak += 1;
+        _todayBestPettingStreak = MAX(_todayBestPettingStreak, _todayPettingStreak);
+        _totalBestPettingStreak = MAX(_totalBestPettingStreak, _totalPettingStreak);
+    } else {
+        _todayPettingRejected += 1;
+        _totalPettingRejected += 1;
+        _todayPettingStreak = 0;
+        _totalPettingStreak = 0;
+    }
+    [self save];
+}
+- (void)recordGuidedWalkBodyLengths:(CGFloat)bodyLengths {
+    if (bodyLengths < 0.35) return;
+    [self ensureCurrentDay];
+    _todayGuidedWalks += 1;
+    _totalGuidedWalks += 1;
+    _todayGuidedBodyLengths += bodyLengths;
+    _totalGuidedBodyLengths += bodyLengths;
+    [self save];
+}
 - (void)recordGiftWithIdentifier:(NSString *)identifier {
     if (identifier.length == 0) return;
     NSInteger count = [_giftCounts[identifier] integerValue] + 1;
     _giftCounts[identifier] = @(count);
+    _giftTotalFound[identifier] = @([_giftTotalFound[identifier] integerValue] + 1);
     if (!_giftFirstFoundDates[identifier]) _giftFirstFoundDates[identifier] = NSDate.date;
     [self save];
+}
+- (BOOL)consumeGiftAndApplyEffectWithIdentifier:(NSString *)identifier {
+    NSInteger count = [_giftCounts[identifier] integerValue];
+    if (identifier.length == 0 || count < 1) return NO;
+    _giftCounts[identifier] = @(count - 1);
+    if ([identifier isEqualToString:@"screw"]) {
+        _vitality = BoundedTraitChange(_vitality, 18.0);
+        _boredom = BoundedTraitChange(_boredom, 4.0);
+    } else if ([identifier isEqualToString:@"feather"]) {
+        _pride = BoundedTraitChange(_pride, 16.0);
+        _vitality = BoundedTraitChange(_vitality, -6.0);
+    } else if ([identifier isEqualToString:@"gear"]) {
+        _boredom = BoundedTraitChange(_boredom, -18.0);
+        _temperValue = BoundedTraitChange(_temperValue, -4.0);
+    } else if ([identifier isEqualToString:@"ruby"]) {
+        _temperValue = BoundedTraitChange(_temperValue, 10.0);
+        _pride = BoundedTraitChange(_pride, -6.0);
+    }
+    [self addCloseness:0.25];
+    [self save];
+    return YES;
 }
 - (NSInteger)giftCountForIdentifier:(NSString *)identifier {
     return [_giftCounts[identifier] integerValue];
@@ -367,7 +488,22 @@ static NSString *CurrentStatsDayKey(void) {
     [defaults setInteger:_totalHisses forKey:@"statsTotalHisses"];
     [defaults setInteger:_todaySleeps forKey:@"statsTodaySleeps"];
     [defaults setInteger:_totalSleeps forKey:@"statsTotalSleeps"];
+    [defaults setInteger:_todayPettings forKey:@"statsTodayPettings"];
+    [defaults setInteger:_totalPettings forKey:@"statsTotalPettings"];
+    [defaults setInteger:_todayPettingAccepted forKey:@"statsTodayPettingAccepted"];
+    [defaults setInteger:_totalPettingAccepted forKey:@"statsTotalPettingAccepted"];
+    [defaults setInteger:_todayPettingRejected forKey:@"statsTodayPettingRejected"];
+    [defaults setInteger:_totalPettingRejected forKey:@"statsTotalPettingRejected"];
+    [defaults setInteger:_todayPettingStreak forKey:@"statsTodayPettingStreak"];
+    [defaults setInteger:_totalPettingStreak forKey:@"statsTotalPettingStreak"];
+    [defaults setInteger:_todayBestPettingStreak forKey:@"statsTodayBestPettingStreak"];
+    [defaults setInteger:_totalBestPettingStreak forKey:@"statsTotalBestPettingStreak"];
+    [defaults setInteger:_todayGuidedWalks forKey:@"statsTodayGuidedWalks"];
+    [defaults setInteger:_totalGuidedWalks forKey:@"statsTotalGuidedWalks"];
+    [defaults setDouble:_todayGuidedBodyLengths forKey:@"statsTodayGuidedBodyLengths"];
+    [defaults setDouble:_totalGuidedBodyLengths forKey:@"statsTotalGuidedBodyLengths"];
     [defaults setObject:_giftCounts.copy forKey:@"giftCounts"];
+    [defaults setObject:_giftTotalFound.copy forKey:@"giftTotalFound"];
     [defaults setObject:_giftFirstFoundDates.copy forKey:@"giftFirstFoundDates"];
     [defaults setDouble:_vitality forKey:@"traitVitality"];
     [defaults setDouble:_temperValue forKey:@"traitTemper"];
@@ -393,7 +529,22 @@ static NSString *CurrentStatsDayKey(void) {
     _totalHisses = 0;
     _todaySleeps = 0;
     _totalSleeps = 0;
+    _todayPettings = 0;
+    _totalPettings = 0;
+    _todayPettingAccepted = 0;
+    _totalPettingAccepted = 0;
+    _todayPettingRejected = 0;
+    _totalPettingRejected = 0;
+    _todayPettingStreak = 0;
+    _totalPettingStreak = 0;
+    _todayBestPettingStreak = 0;
+    _totalBestPettingStreak = 0;
+    _todayGuidedWalks = 0;
+    _totalGuidedWalks = 0;
+    _todayGuidedBodyLengths = 0.0;
+    _totalGuidedBodyLengths = 0.0;
     [_giftCounts removeAllObjects];
+    [_giftTotalFound removeAllObjects];
     [_giftFirstFoundDates removeAllObjects];
     _vitality = 68.0;
     _temperValue = 22.0;
@@ -413,6 +564,13 @@ static NSString *FormatCompanionDuration(NSTimeInterval seconds) {
     if (hours > 0) return [NSString stringWithFormat:@"%ld 小时 %ld 分钟", (long)hours, (long)minutes];
     if (minutes > 0) return [NSString stringWithFormat:@"%ld 分钟", (long)minutes];
     return @"不到 1 分钟";
+}
+
+static NSString *FormatAverageInterval(NSTimeInterval seconds) {
+    if (seconds < 60.0) return [NSString stringWithFormat:@"%.0f 秒", MAX(1.0, seconds)];
+    CGFloat minutes = seconds / 60.0;
+    if (minutes < 60.0) return [NSString stringWithFormat:@"%.1f 分钟", minutes];
+    return [NSString stringWithFormat:@"%.1f 小时", minutes / 60.0];
 }
 
 static NSTextField *StatsLabel(NSRect frame, NSString *text, NSFont *font, NSColor *color) {
@@ -457,22 +615,30 @@ static NSTextField *AddTodayCard(NSView *parent,
     return value;
 }
 
-static NSTextField *AddTotalMetric(NSView *parent,
-                                    CGFloat x,
-                                    CGFloat y,
-                                    NSString *title,
-                                    CGFloat width) {
-    [parent addSubview:StatsLabel(NSMakeRect(x, y + 23, width, 17), title,
-                                  [NSFont systemFontOfSize:11.0 weight:NSFontWeightMedium],
-                                  NSColor.secondaryLabelColor)];
-    NSTextField *value = StatsLabel(NSMakeRect(x, y, width, 23), @"—",
-                                    [NSFont systemFontOfSize:15.0 weight:NSFontWeightSemibold],
+static NSArray<NSTextField *> *AddMemoryCard(NSView *parent,
+                                              NSRect frame,
+                                              NSString *icon,
+                                              NSString *title,
+                                              NSColor *color) {
+    NSBox *card = StatsCard(parent, frame, [color colorWithAlphaComponent:0.105]);
+    [card addSubview:StatsLabel(NSMakeRect(14, 29, 30, 34), icon,
+                                [NSFont systemFontOfSize:23.0], NSColor.labelColor)];
+    [card addSubview:StatsLabel(NSMakeRect(52, 56, frame.size.width - 66, 18), title,
+                                [NSFont systemFontOfSize:11.5 weight:NSFontWeightMedium],
+                                NSColor.secondaryLabelColor)];
+    NSTextField *value = StatsLabel(NSMakeRect(52, 31, frame.size.width - 66, 25), @"—",
+                                    [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold],
                                     NSColor.labelColor);
-    [parent addSubview:value];
-    return value;
+    NSTextField *equivalent = StatsLabel(NSMakeRect(52, 9, frame.size.width - 66, 18), @"—",
+                                         [NSFont systemFontOfSize:10.0 weight:NSFontWeightMedium],
+                                         [NSColor.systemPurpleColor colorWithAlphaComponent:0.86]);
+    [card addSubview:value];
+    [card addSubview:equivalent];
+    return @[value, equivalent];
 }
 
 @interface StatsWindowController : NSObject
+@property(nonatomic, copy) BOOL (^giftUseHandler)(NSString *identifier);
 - (instancetype)initWithStats:(PetStats *)stats;
 - (void)show;
 - (void)refreshIfVisible;
@@ -486,14 +652,29 @@ static NSTextField *AddTotalMetric(NSView *parent,
     NSTextField *_todayPounceLabel;
     NSTextField *_todayHissLabel;
     NSTextField *_todaySleepLabel;
+    NSTextField *_todayPermissionRateLabel;
+    NSTextField *_todayPounceAccuracyLabel;
+    NSTextField *_todayGuidedAverageLabel;
     NSTextField *_totalCompanionLabel;
     NSTextField *_totalInteractionsLabel;
     NSTextField *_totalCaughtLabel;
     NSTextField *_totalMissedLabel;
     NSTextField *_totalHissLabel;
     NSTextField *_totalSleepLabel;
+    NSTextField *_totalCompanionEquivalentLabel;
+    NSTextField *_totalPettingEquivalentLabel;
+    NSTextField *_totalPounceEquivalentLabel;
+    NSTextField *_totalGuidedEquivalentLabel;
+    NSTextField *_totalHissEquivalentLabel;
+    NSTextField *_totalSleepEquivalentLabel;
+    NSTextField *_totalPermissionLabel;
+    NSTextField *_totalPermissionEquivalentLabel;
+    NSTextField *_totalOverviewInteractionsLabel;
+    NSTextField *_totalOverviewGiftsLabel;
+    NSTextField *_totalOverviewKindsLabel;
     NSSegmentedControl *_sectionControl;
     NSVisualEffectView *_giftView;
+    NSVisualEffectView *_memoryView;
     NSTextField *_giftSummaryLabel;
     NSMutableArray<NSImageView *> *_giftImageViews;
     NSMutableArray<NSTextField *> *_giftPlaceholderLabels;
@@ -501,8 +682,12 @@ static NSTextField *AddTotalMetric(NSView *parent,
     NSMutableArray<NSTextField *> *_giftCountLabels;
     NSMutableArray<NSTextField *> *_giftDateLabels;
     NSMutableArray<NSTextField *> *_giftNoteLabels;
+    NSMutableArray<NSTextField *> *_giftEffectLabels;
+    NSMutableArray<NSButton *> *_giftUseButtons;
     NSArray<NSView *> *_journalSubviews;
     NSMutableDictionary<NSString *, NSProgressIndicator *> *_traitIndicators;
+    NSMutableDictionary<NSString *, NSProgressIndicator *> *_giftTraitIndicators;
+    NSPopover *_traitHelpPopover;
 }
 
 - (instancetype)initWithStats:(PetStats *)stats {
@@ -557,6 +742,16 @@ static NSTextField *AddTotalMetric(NSView *parent,
 
     [root addSubview:StatsLabel(NSMakeRect(29, 512, 200, 24), @"现在的多涅",
                                 [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
+    NSButton *journalTraitHelp = [[NSButton alloc] initWithFrame:NSMakeRect(112, 510, 26, 24)];
+    journalTraitHelp.title = @"ⓘ";
+    journalTraitHelp.bordered = NO;
+    journalTraitHelp.focusRingType = NSFocusRingTypeNone;
+    journalTraitHelp.font = [NSFont systemFontOfSize:14.0 weight:NSFontWeightRegular];
+    journalTraitHelp.contentTintColor = NSColor.tertiaryLabelColor;
+    journalTraitHelp.toolTip = @"属性说明";
+    journalTraitHelp.target = self;
+    journalTraitHelp.action = @selector(showTraitHelp:);
+    [root addSubview:journalTraitHelp];
     NSBox *traitCard = StatsCard(root, NSMakeRect(28, 442, 444, 64),
                                  [NSColor.systemPurpleColor colorWithAlphaComponent:0.08]);
     _traitIndicators = [NSMutableDictionary dictionary];
@@ -565,15 +760,14 @@ static NSTextField *AddTotalMetric(NSView *parent,
         @[@"pride", @"👑 得意"], @[@"closeness", @"🤍 亲近"]
     ];
     for (NSInteger index = 0; index < (NSInteger)traitDefinitions.count; index++) {
-        NSInteger column = index % 3;
-        NSInteger row = index / 3;
-        CGFloat x = 14.0 + column * 142.0;
-        CGFloat y = row == 0 ? 34.0 : 7.0;
+        CGFloat x = 10.0 + index * 86.0;
         NSArray *definition = traitDefinitions[index];
-        [traitCard addSubview:StatsLabel(NSMakeRect(x, y + 9, 58, 17), definition[1],
-                                           [NSFont systemFontOfSize:10.0 weight:NSFontWeightMedium],
-                                           NSColor.secondaryLabelColor)];
-        NSProgressIndicator *indicator = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(x + 59, y + 12, 68, 8)];
+        NSTextField *name = StatsLabel(NSMakeRect(x, 36, 70, 17), definition[1],
+                                       [NSFont systemFontOfSize:10.0 weight:NSFontWeightMedium],
+                                       NSColor.secondaryLabelColor);
+        name.alignment = NSTextAlignmentCenter;
+        [traitCard addSubview:name];
+        NSProgressIndicator *indicator = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(x, 18, 70, 8)];
         indicator.indeterminate = NO;
         indicator.minValue = 0;
         indicator.maxValue = 100;
@@ -584,22 +778,34 @@ static NSTextField *AddTotalMetric(NSView *parent,
 
     [root addSubview:StatsLabel(NSMakeRect(29, 407, 200, 24), @"今天发生了什么",
                                 [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
-    _todayInteractionsLabel = AddTodayCard(root, NSMakeRect(28, 331, 216, 64), @"🐾", @"互动", NSColor.systemBlueColor);
+    _todayInteractionsLabel = AddTodayCard(root, NSMakeRect(28, 331, 216, 64), @"♡", @"摸摸记录", NSColor.systemBlueColor);
     _todayPounceLabel = AddTodayCard(root, NSMakeRect(256, 331, 216, 64), @"⚡", @"扑扑记录", NSColor.systemOrangeColor);
     _todayHissLabel = AddTodayCard(root, NSMakeRect(28, 255, 216, 64), @"💢", @"哈气", NSColor.systemRedColor);
     _todaySleepLabel = AddTodayCard(root, NSMakeRect(256, 255, 216, 64), @"☾", @"睡觉", NSColor.systemIndigoColor);
 
-    [root addSubview:StatsLabel(NSMakeRect(29, 219, 200, 24), @"从相遇到现在",
+    [root addSubview:StatsLabel(NSMakeRect(29, 214, 200, 24), @"今日小习惯",
                                 [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
-    NSBox *totalCard = StatsCard(root, NSMakeRect(28, 82, 444, 125),
-                                 [NSColor.labelColor colorWithAlphaComponent:0.055]);
-    CGFloat metricWidth = 124.0;
-    _totalCompanionLabel = AddTotalMetric(totalCard, 18, 70, @"陪伴时间", metricWidth);
-    _totalInteractionsLabel = AddTotalMetric(totalCard, 160, 70, @"互动", metricWidth);
-    _totalCaughtLabel = AddTotalMetric(totalCard, 302, 70, @"抓到鼠标", metricWidth);
-    _totalMissedLabel = AddTotalMetric(totalCard, 18, 16, @"扑了个空", metricWidth);
-    _totalHissLabel = AddTotalMetric(totalCard, 160, 16, @"哈气", metricWidth);
-    _totalSleepLabel = AddTotalMetric(totalCard, 302, 16, @"睡觉", metricWidth);
+    NSBox *todayHabitCard = StatsCard(root, NSMakeRect(28, 132, 444, 70),
+                                      [NSColor.systemPurpleColor colorWithAlphaComponent:0.075]);
+    NSArray<NSString *> *todayHabitTitles = @[@"摸头默许率", @"扑击命中率", @"平均跟随"];
+    NSMutableArray<NSTextField *> *todayHabitValues = [NSMutableArray array];
+    for (NSInteger index = 0; index < 3; index++) {
+        CGFloat x = 16.0 + index * 141.0;
+        NSTextField *title = StatsLabel(NSMakeRect(x, 40, 130, 18), todayHabitTitles[index],
+                                        [NSFont systemFontOfSize:10.5 weight:NSFontWeightMedium],
+                                        NSColor.secondaryLabelColor);
+        title.alignment = NSTextAlignmentCenter;
+        [todayHabitCard addSubview:title];
+        NSTextField *value = StatsLabel(NSMakeRect(x, 14, 130, 24), @"—",
+                                        [NSFont systemFontOfSize:15.0 weight:NSFontWeightSemibold],
+                                        NSColor.labelColor);
+        value.alignment = NSTextAlignmentCenter;
+        [todayHabitCard addSubview:value];
+        [todayHabitValues addObject:value];
+    }
+    _todayPermissionRateLabel = todayHabitValues[0];
+    _todayPounceAccuracyLabel = todayHabitValues[1];
+    _todayGuidedAverageLabel = todayHabitValues[2];
 
     [root addSubview:StatsLabel(NSMakeRect(29, 51, 300, 18), @"🔒  记录只留在这台 Mac 上",
                                 [NSFont systemFontOfSize:11.0], NSColor.tertiaryLabelColor)];
@@ -631,62 +837,212 @@ static NSTextField *AddTotalMetric(NSView *parent,
     [_giftView addSubview:StatsLabel(NSMakeRect(99, 676, 360, 20), @"她坚称这些东西不是送给你的",
                                      [NSFont systemFontOfSize:13.0], NSColor.secondaryLabelColor)];
 
-    _giftSummaryLabel = StatsLabel(NSMakeRect(28, 552, 444, 30), @"—",
+    _giftSummaryLabel = StatsLabel(NSMakeRect(28, 590, 444, 26), @"—",
                                    [NSFont systemFontOfSize:17.0 weight:NSFontWeightSemibold], NSColor.labelColor);
     _giftSummaryLabel.alignment = NSTextAlignmentCenter;
     [_giftView addSubview:_giftSummaryLabel];
+    [_giftView addSubview:StatsLabel(NSMakeRect(29, 562, 200, 22), @"现在的多涅",
+                                     [NSFont systemFontOfSize:15.0 weight:NSFontWeightSemibold],
+                                     NSColor.labelColor)];
+    NSButton *giftTraitHelp = [[NSButton alloc] initWithFrame:NSMakeRect(112, 560, 26, 24)];
+    giftTraitHelp.title = @"ⓘ";
+    giftTraitHelp.bordered = NO;
+    giftTraitHelp.focusRingType = NSFocusRingTypeNone;
+    giftTraitHelp.font = [NSFont systemFontOfSize:14.0 weight:NSFontWeightRegular];
+    giftTraitHelp.contentTintColor = NSColor.tertiaryLabelColor;
+    giftTraitHelp.toolTip = @"属性说明";
+    giftTraitHelp.target = self;
+    giftTraitHelp.action = @selector(showTraitHelp:);
+    [_giftView addSubview:giftTraitHelp];
+    NSBox *giftTraitCard = StatsCard(_giftView, NSMakeRect(28, 500, 444, 58),
+                                     [NSColor.systemPurpleColor colorWithAlphaComponent:0.08]);
+    _giftTraitIndicators = [NSMutableDictionary dictionary];
+    NSArray<NSArray *> *giftTraitDefinitions = @[
+        @[@"vitality", @"⚡ 活力"], @[@"temper", @"💢 脾气"], @[@"boredom", @"🧶 无聊"],
+        @[@"pride", @"👑 得意"], @[@"closeness", @"🤍 亲近"]
+    ];
+    for (NSInteger index = 0; index < (NSInteger)giftTraitDefinitions.count; index++) {
+        CGFloat x = 10.0 + index * 86.0;
+        NSArray *definition = giftTraitDefinitions[index];
+        NSTextField *name = StatsLabel(NSMakeRect(x, 32, 70, 17), definition[1],
+                                       [NSFont systemFontOfSize:10.0 weight:NSFontWeightMedium],
+                                       NSColor.secondaryLabelColor);
+        name.alignment = NSTextAlignmentCenter;
+        [giftTraitCard addSubview:name];
+        NSProgressIndicator *indicator = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(x, 14, 70, 8)];
+        indicator.indeterminate = NO;
+        indicator.minValue = 0;
+        indicator.maxValue = 100;
+        indicator.style = NSProgressIndicatorStyleBar;
+        [giftTraitCard addSubview:indicator];
+        _giftTraitIndicators[definition[0]] = indicator;
+    }
     _giftImageViews = [NSMutableArray array];
     _giftPlaceholderLabels = [NSMutableArray array];
     _giftNameLabels = [NSMutableArray array];
     _giftCountLabels = [NSMutableArray array];
     _giftDateLabels = [NSMutableArray array];
     _giftNoteLabels = [NSMutableArray array];
+    _giftEffectLabels = [NSMutableArray array];
+    _giftUseButtons = [NSMutableArray array];
     NSArray<NSValue *> *giftFrames = @[
-        [NSValue valueWithRect:NSMakeRect(28, 273, 216, 150)],
-        [NSValue valueWithRect:NSMakeRect(256, 273, 216, 150)],
-        [NSValue valueWithRect:NSMakeRect(28, 105, 216, 150)],
-        [NSValue valueWithRect:NSMakeRect(256, 105, 216, 150)]
+        [NSValue valueWithRect:NSMakeRect(28, 292, 216, 172)],
+        [NSValue valueWithRect:NSMakeRect(256, 292, 216, 172)],
+        [NSValue valueWithRect:NSMakeRect(28, 108, 216, 172)],
+        [NSValue valueWithRect:NSMakeRect(256, 108, 216, 172)]
     ];
     for (NSInteger index = 0; index < (NSInteger)GiftDefinitions().count; index++) {
         NSRect frame = giftFrames[index].rectValue;
         NSBox *card = StatsCard(_giftView, frame,
                                 [NSColor.labelColor colorWithAlphaComponent:0.055]);
-        NSImageView *icon = [[NSImageView alloc] initWithFrame:NSMakeRect(15, 87, 49, 49)];
+        NSImageView *icon = [[NSImageView alloc] initWithFrame:NSMakeRect(15, 109, 49, 49)];
         icon.imageScaling = NSImageScaleProportionallyUpOrDown;
         [card addSubview:icon];
-        NSTextField *placeholder = StatsLabel(NSMakeRect(15, 87, 49, 49), @"？",
+        NSTextField *placeholder = StatsLabel(NSMakeRect(15, 109, 49, 49), @"？",
                                               [NSFont systemFontOfSize:34.0], NSColor.labelColor);
         placeholder.alignment = NSTextAlignmentCenter;
         [card addSubview:placeholder];
-        NSTextField *name = StatsLabel(NSMakeRect(72, 112, 128, 22), @"尚未发现",
+        NSTextField *name = StatsLabel(NSMakeRect(72, 134, 128, 22), @"尚未发现",
                                        [NSFont systemFontOfSize:15.0 weight:NSFontWeightSemibold], NSColor.labelColor);
         [card addSubview:name];
-        NSTextField *count = StatsLabel(NSMakeRect(72, 87, 128, 20), @"—",
+        NSTextField *count = StatsLabel(NSMakeRect(72, 109, 128, 20), @"—",
                                         [NSFont systemFontOfSize:13.0], NSColor.secondaryLabelColor);
         [card addSubview:count];
-        NSTextField *date = StatsLabel(NSMakeRect(16, 57, 184, 18), @"首次发现：—",
+        NSTextField *date = StatsLabel(NSMakeRect(16, 86, 184, 18), @"首次发现：—",
                                        [NSFont systemFontOfSize:11.0], NSColor.tertiaryLabelColor);
         [card addSubview:date];
-        NSTextField *note = StatsLabel(NSMakeRect(16, 12, 184, 38), @"多涅还没有找到它。",
+        NSTextField *note = StatsLabel(NSMakeRect(16, 57, 184, 28), @"多涅还没有找到它。",
                                        [NSFont systemFontOfSize:11.0], NSColor.secondaryLabelColor);
         note.lineBreakMode = NSLineBreakByWordWrapping;
         note.maximumNumberOfLines = 2;
         note.usesSingleLineMode = NO;
         [card addSubview:note];
+        NSTextField *effect = StatsLabel(NSMakeRect(16, 32, 184, 24), @"效果：—",
+                                         [NSFont systemFontOfSize:9.5 weight:NSFontWeightMedium],
+                                         NSColor.systemPurpleColor);
+        effect.lineBreakMode = NSLineBreakByWordWrapping;
+        effect.maximumNumberOfLines = 2;
+        effect.usesSingleLineMode = NO;
+        [card addSubview:effect];
+        NSButton *give = [[NSButton alloc] initWithFrame:NSMakeRect(60, 7, 96, 24)];
+        give.title = @"送她这个";
+        give.bezelStyle = NSBezelStyleRounded;
+        give.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightSemibold];
+        give.tag = index;
+        give.target = self;
+        give.action = @selector(giveGift:);
+        give.enabled = NO;
+        [card addSubview:give];
         [_giftImageViews addObject:icon];
         [_giftPlaceholderLabels addObject:placeholder];
         [_giftNameLabels addObject:name];
         [_giftCountLabels addObject:count];
         [_giftDateLabels addObject:date];
         [_giftNoteLabels addObject:note];
+        [_giftEffectLabels addObject:effect];
+        [_giftUseButtons addObject:give];
     }
+    NSTextField *giftHint = StatsLabel(NSMakeRect(28, 476, 444, 18),
+                                       @"会消耗 1 件，并影响多涅当前的状态。",
+                                       [NSFont systemFontOfSize:11.0], NSColor.tertiaryLabelColor);
+    giftHint.alignment = NSTextAlignmentCenter;
+    [_giftView addSubview:giftHint];
     [_giftView addSubview:StatsLabel(NSMakeRect(29, 51, 300, 18), @"🔒  收藏只留在这台 Mac 上",
                                      [NSFont systemFontOfSize:11.0], NSColor.tertiaryLabelColor)];
 
-    _sectionControl = [[NSSegmentedControl alloc] initWithFrame:NSMakeRect(160, 637, 180, 28)];
-    _sectionControl.segmentCount = 2;
+    _memoryView = [[NSVisualEffectView alloc] initWithFrame:root.bounds];
+    _memoryView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    _memoryView.material = NSVisualEffectMaterialSidebar;
+    _memoryView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    _memoryView.state = NSVisualEffectStateActive;
+    _memoryView.hidden = YES;
+    [root addSubview:_memoryView];
+
+    NSBox *memoryAvatar = StatsCard(_memoryView, NSMakeRect(28, 676, 54, 54),
+                                    [NSColor colorWithRed:0.89 green:0.86 blue:0.97 alpha:0.96]);
+    memoryAvatar.cornerRadius = 27.0;
+    NSTextField *memoryIcon = StatsLabel(NSMakeRect(10, 10, 34, 34), @"📖",
+                                         [NSFont systemFontOfSize:24.0], NSColor.labelColor);
+    memoryIcon.alignment = NSTextAlignmentCenter;
+    [memoryAvatar addSubview:memoryIcon];
+    [_memoryView addSubview:StatsLabel(NSMakeRect(98, 698, 360, 32), @"从相遇到现在",
+                                       [NSFont systemFontOfSize:26.0 weight:NSFontWeightBold], NSColor.labelColor)];
+    [_memoryView addSubview:StatsLabel(NSMakeRect(99, 676, 360, 20), @"从累计记录里整理出的行为数据",
+                                       [NSFont systemFontOfSize:13.0], NSColor.secondaryLabelColor)];
+
+    NSBox *memoryHero = StatsCard(_memoryView, NSMakeRect(28, 542, 444, 72),
+                                  [NSColor.systemPurpleColor colorWithAlphaComponent:0.13]);
+    [memoryHero addSubview:StatsLabel(NSMakeRect(18, 24, 36, 34), @"♡",
+                                      [NSFont systemFontOfSize:28.0 weight:NSFontWeightLight], NSColor.systemPurpleColor)];
+    [memoryHero addSubview:StatsLabel(NSMakeRect(62, 40, 200, 18), @"总陪伴时间",
+                                      [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium], NSColor.secondaryLabelColor)];
+    _totalCompanionLabel = StatsLabel(NSMakeRect(62, 13, 180, 29), @"—",
+                                      [NSFont systemFontOfSize:21.0 weight:NSFontWeightSemibold], NSColor.labelColor);
+    _totalCompanionEquivalentLabel = StatsLabel(NSMakeRect(250, 18, 170, 21), @"—",
+                                                 [NSFont systemFontOfSize:11.0 weight:NSFontWeightSemibold],
+                                                 NSColor.systemPurpleColor);
+    _totalCompanionEquivalentLabel.alignment = NSTextAlignmentRight;
+    [memoryHero addSubview:_totalCompanionLabel];
+    [memoryHero addSubview:_totalCompanionEquivalentLabel];
+
+    [_memoryView addSubview:StatsLabel(NSMakeRect(29, 507, 200, 24), @"她的小习惯",
+                                       [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
+    NSTextField *memoryBadge = StatsLabel(NSMakeRect(344, 509, 128, 20), @"累计统计",
+                                          [NSFont systemFontOfSize:10.0 weight:NSFontWeightSemibold],
+                                          NSColor.systemPurpleColor);
+    memoryBadge.alignment = NSTextAlignmentRight;
+    [_memoryView addSubview:memoryBadge];
+
+    NSArray<NSTextField *> *memoryCard = AddMemoryCard(_memoryView, NSMakeRect(28, 405, 216, 84), @"♡", @"摸头", NSColor.systemPinkColor);
+    _totalInteractionsLabel = memoryCard[0];
+    _totalPettingEquivalentLabel = memoryCard[1];
+    memoryCard = AddMemoryCard(_memoryView, NSMakeRect(256, 405, 216, 84), @"🐾", @"摸头反应", NSColor.systemBlueColor);
+    _totalPermissionLabel = memoryCard[0];
+    _totalPermissionEquivalentLabel = memoryCard[1];
+    memoryCard = AddMemoryCard(_memoryView, NSMakeRect(28, 309, 216, 84), @"⚡", @"扑扑记录", NSColor.systemOrangeColor);
+    _totalCaughtLabel = memoryCard[0];
+    _totalPounceEquivalentLabel = memoryCard[1];
+    memoryCard = AddMemoryCard(_memoryView, NSMakeRect(256, 309, 216, 84), @"↝", @"跟着走", NSColor.systemTealColor);
+    _totalMissedLabel = memoryCard[0];
+    _totalGuidedEquivalentLabel = memoryCard[1];
+    memoryCard = AddMemoryCard(_memoryView, NSMakeRect(28, 213, 216, 84), @"💢", @"哈气", NSColor.systemRedColor);
+    _totalHissLabel = memoryCard[0];
+    _totalHissEquivalentLabel = memoryCard[1];
+    memoryCard = AddMemoryCard(_memoryView, NSMakeRect(256, 213, 216, 84), @"☾", @"睡觉", NSColor.systemIndigoColor);
+    _totalSleepLabel = memoryCard[0];
+    _totalSleepEquivalentLabel = memoryCard[1];
+
+    [_memoryView addSubview:StatsLabel(NSMakeRect(29, 172, 200, 24), @"累计总览",
+                                       [NSFont systemFontOfSize:16.0 weight:NSFontWeightSemibold], NSColor.labelColor)];
+    NSBox *memoryOverviewCard = StatsCard(_memoryView, NSMakeRect(28, 101, 444, 60),
+                                          [NSColor.labelColor colorWithAlphaComponent:0.055]);
+    NSArray<NSString *> *overviewTitles = @[@"总互动", @"找到物品", @"发现种类"];
+    NSMutableArray<NSTextField *> *overviewValues = [NSMutableArray array];
+    for (NSInteger index = 0; index < 3; index++) {
+        CGFloat x = 16.0 + index * 141.0;
+        NSTextField *title = StatsLabel(NSMakeRect(x, 33, 130, 17), overviewTitles[index],
+                                        [NSFont systemFontOfSize:10.5 weight:NSFontWeightMedium],
+                                        NSColor.secondaryLabelColor);
+        title.alignment = NSTextAlignmentCenter;
+        [memoryOverviewCard addSubview:title];
+        NSTextField *value = StatsLabel(NSMakeRect(x, 9, 130, 23), @"—",
+                                        [NSFont systemFontOfSize:15.0 weight:NSFontWeightSemibold],
+                                        NSColor.labelColor);
+        value.alignment = NSTextAlignmentCenter;
+        [memoryOverviewCard addSubview:value];
+        [overviewValues addObject:value];
+    }
+    _totalOverviewInteractionsLabel = overviewValues[0];
+    _totalOverviewGiftsLabel = overviewValues[1];
+    _totalOverviewKindsLabel = overviewValues[2];
+    [_memoryView addSubview:StatsLabel(NSMakeRect(29, 51, 330, 18), @"🔒  回忆只留在这台 Mac 上",
+                                       [NSFont systemFontOfSize:11.0], NSColor.tertiaryLabelColor)];
+
+    _sectionControl = [[NSSegmentedControl alloc] initWithFrame:NSMakeRect(130, 637, 240, 28)];
+    _sectionControl.segmentCount = 3;
     [_sectionControl setLabel:@"小记" forSegment:0];
-    [_sectionControl setLabel:@"小箱子" forSegment:1];
+    [_sectionControl setLabel:@"回忆" forSegment:1];
+    [_sectionControl setLabel:@"小箱子" forSegment:2];
     ((NSSegmentedCell *)_sectionControl.cell).trackingMode = NSSegmentSwitchTrackingSelectOne;
     _sectionControl.target = self;
     _sectionControl.action = @selector(changeSection:);
@@ -695,25 +1051,112 @@ static NSTextField *AddTotalMetric(NSView *parent,
     [_window center];
 }
 
+- (void)showTraitHelp:(NSButton *)sender {
+    if (!_traitHelpPopover) {
+        NSViewController *controller = [[NSViewController alloc] init];
+        NSView *content = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 350, 188)];
+        [content addSubview:StatsLabel(NSMakeRect(18, 154, 314, 24), @"属性会怎样影响多涅？",
+                                       [NSFont systemFontOfSize:15.0 weight:NSFontWeightSemibold],
+                                       NSColor.labelColor)];
+        NSArray<NSString *> *lines = @[
+            @"⚡ 活力：越高越爱散步、跳跃，也更愿意扑鼠标",
+            @"💢 脾气：越高越容易哈气、拒绝摸头，也更不愿意扑鼠标",
+            @"🧶 无聊：越高越容易主动走动、挥爪和扑鼠标",
+            @"👑 得意：越高越爱跳，也更容易露出傲娇反应",
+            @"🤍 亲近：越高越愿意回应、扑鼠标和接受摸头"
+        ];
+        for (NSInteger index = 0; index < (NSInteger)lines.count; index++) {
+            [content addSubview:StatsLabel(NSMakeRect(18, 122 - index * 27, 314, 22), lines[index],
+                                           [NSFont systemFontOfSize:11.5], NSColor.secondaryLabelColor)];
+        }
+        controller.view = content;
+        _traitHelpPopover = [[NSPopover alloc] init];
+        _traitHelpPopover.contentViewController = controller;
+        _traitHelpPopover.contentSize = content.frame.size;
+        _traitHelpPopover.behavior = NSPopoverBehaviorTransient;
+    }
+    if (_traitHelpPopover.shown) [_traitHelpPopover close];
+    else [_traitHelpPopover showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMaxY];
+}
+
 - (void)refresh {
     _todayCompanionLabel.stringValue = FormatCompanionDuration(_stats.todayCompanionSeconds);
-    _todayInteractionsLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.todayInteractions];
+    _todayInteractionsLabel.stringValue = [NSString stringWithFormat:@"接受 %ld · 拒绝 %ld",
+                                             (long)_stats.todayPettingAccepted,
+                                             (long)_stats.todayPettingRejected];
     _todayPounceLabel.stringValue = [NSString stringWithFormat:@"抓到 %ld · 扑空 %ld",
                                      (long)_stats.todayCaught, (long)_stats.todayMissed];
     _todayHissLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.todayHisses];
     _todaySleepLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.todaySleeps];
+    _todayPermissionRateLabel.stringValue = _stats.todayPettings > 0
+        ? [NSString stringWithFormat:@"%.1f%%", 100.0 * _stats.todayPettingAccepted / _stats.todayPettings]
+        : @"暂无记录";
+    NSInteger todayPounces = _stats.todayCaught + _stats.todayMissed;
+    _todayPounceAccuracyLabel.stringValue = todayPounces > 0
+        ? [NSString stringWithFormat:@"%.1f%%", 100.0 * _stats.todayCaught / todayPounces]
+        : @"暂无记录";
+    _todayGuidedAverageLabel.stringValue = _stats.todayGuidedWalks > 0
+        ? [NSString stringWithFormat:@"%.1f 身位", _stats.todayGuidedBodyLengths / _stats.todayGuidedWalks]
+        : @"暂无记录";
     _totalCompanionLabel.stringValue = FormatCompanionDuration(_stats.totalCompanionSeconds);
-    _totalInteractionsLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalInteractions];
-    _totalCaughtLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalCaught];
-    _totalMissedLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalMissed];
+    _totalInteractionsLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalPettings];
+    _totalPermissionLabel.stringValue = [NSString stringWithFormat:@"接受 %ld · 拒绝 %ld",
+                                          (long)_stats.totalPettingAccepted,
+                                          (long)_stats.totalPettingRejected];
+    _totalCaughtLabel.stringValue = [NSString stringWithFormat:@"抓 %ld · 空 %ld",
+                                      (long)_stats.totalCaught,
+                                      (long)_stats.totalMissed];
+    _totalMissedLabel.stringValue = [NSString stringWithFormat:@"%ld 次 · %.1f 身位",
+                                      (long)_stats.totalGuidedWalks,
+                                      _stats.totalGuidedBodyLengths];
     _totalHissLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalHisses];
     _totalSleepLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalSleeps];
+    _totalOverviewInteractionsLabel.stringValue = [NSString stringWithFormat:@"%ld 次", (long)_stats.totalInteractions];
+    _totalOverviewGiftsLabel.stringValue = [NSString stringWithFormat:@"%ld 件", (long)_stats.totalFoundGifts];
+    _totalOverviewKindsLabel.stringValue = [NSString stringWithFormat:@"%ld / %ld",
+                                             (long)_stats.discoveredGiftKinds,
+                                             (long)GiftDefinitions().count];
+    CGFloat interactionsPerHour = _stats.totalCompanionSeconds >= 60.0
+        ? 3600.0 * _stats.totalInteractions / _stats.totalCompanionSeconds : 0.0;
+    CGFloat pettingPermission = _stats.totalPettings > 0
+        ? 100.0 * _stats.totalPettingAccepted / (CGFloat)_stats.totalPettings : 0.0;
+    NSInteger totalPounces = _stats.totalCaught + _stats.totalMissed;
+    CGFloat pounceAccuracy = totalPounces > 0
+        ? 100.0 * _stats.totalCaught / (CGFloat)totalPounces : 0.0;
+    _totalCompanionEquivalentLabel.stringValue = _stats.totalCompanionSeconds >= 60.0
+        ? [NSString stringWithFormat:@"平均每小时互动 %.1f 次", interactionsPerHour] : @"记录时间不足";
+    _totalPettingEquivalentLabel.stringValue = _stats.totalPettings > 0
+        ? [NSString stringWithFormat:@"最长连续摸头 %ld 次", (long)_stats.totalBestPettingStreak]
+        : @"暂无摸头记录";
+    _totalPermissionEquivalentLabel.stringValue = _stats.totalPettings > 0
+        ? [NSString stringWithFormat:@"摸头默许率 %.1f%%", pettingPermission] : @"暂无摸头记录";
+    _totalPounceEquivalentLabel.stringValue = totalPounces > 0
+        ? [NSString stringWithFormat:@"扑击命中率 %.1f%%", pounceAccuracy] : @"暂无扑击记录";
+    _totalGuidedEquivalentLabel.stringValue = _stats.totalGuidedWalks > 0
+        ? [NSString stringWithFormat:@"平均每次 %.1f 个身位",
+           _stats.totalGuidedBodyLengths / _stats.totalGuidedWalks] : @"暂无跟随记录";
+    if (_stats.totalHisses > 0 && _stats.totalInteractions > 0) {
+        CGFloat interactionsPerHiss = _stats.totalInteractions / (CGFloat)_stats.totalHisses;
+        _totalHissEquivalentLabel.stringValue = interactionsPerHiss >= 1.0
+            ? [NSString stringWithFormat:@"平均每 %.1f 次互动哈气一次", interactionsPerHiss]
+            : [NSString stringWithFormat:@"平均每次互动哈气 %.1f 次", 1.0 / interactionsPerHiss];
+    } else {
+        _totalHissEquivalentLabel.stringValue = @"暂无哈气频率";
+    }
+    _totalSleepEquivalentLabel.stringValue = _stats.totalSleeps > 0 && _stats.totalCompanionSeconds > 0
+        ? [NSString stringWithFormat:@"平均每 %@ 睡一次",
+           FormatAverageInterval(_stats.totalCompanionSeconds / _stats.totalSleeps)] : @"暂无睡眠频率";
     _traitIndicators[@"vitality"].doubleValue = _stats.vitality;
     _traitIndicators[@"temper"].doubleValue = _stats.temperValue;
     _traitIndicators[@"boredom"].doubleValue = _stats.boredom;
     _traitIndicators[@"pride"].doubleValue = _stats.pride;
     _traitIndicators[@"closeness"].doubleValue = _stats.closeness;
-    _giftSummaryLabel.stringValue = [NSString stringWithFormat:@"已发现 %ld / %ld · 共收藏 %ld 件",
+    _giftTraitIndicators[@"vitality"].doubleValue = _stats.vitality;
+    _giftTraitIndicators[@"temper"].doubleValue = _stats.temperValue;
+    _giftTraitIndicators[@"boredom"].doubleValue = _stats.boredom;
+    _giftTraitIndicators[@"pride"].doubleValue = _stats.pride;
+    _giftTraitIndicators[@"closeness"].doubleValue = _stats.closeness;
+    _giftSummaryLabel.stringValue = [NSString stringWithFormat:@"已发现 %ld / %ld · 当前持有 %ld 件",
                                      (long)_stats.discoveredGiftKinds,
                                      (long)GiftDefinitions().count,
                                      (long)_stats.totalGifts];
@@ -723,15 +1166,18 @@ static NSTextField *AddTotalMetric(NSView *parent,
         NSDictionary<NSString *, id> *gift = GiftDefinitions()[index];
         NSString *identifier = gift[@"id"];
         NSInteger count = [_stats giftCountForIdentifier:identifier];
-        if (count > 0) {
+        BOOL discovered = [_stats firstFoundDateForIdentifier:identifier] != nil;
+        if (discovered) {
             _giftImageViews[index].image = GiftImageForDefinition(gift);
             _giftPlaceholderLabels[index].hidden = YES;
             _giftNameLabels[index].stringValue = gift[@"name"];
-            _giftCountLabels[index].stringValue = [NSString stringWithFormat:@"收藏 %ld 件", (long)count];
+            _giftCountLabels[index].stringValue = [NSString stringWithFormat:@"持有 %ld 件", (long)count];
             NSDate *firstFound = [_stats firstFoundDateForIdentifier:identifier];
             _giftDateLabels[index].stringValue = [NSString stringWithFormat:@"首次发现：%@",
                                                    firstFound ? [formatter stringFromDate:firstFound] : @"—"];
             _giftNoteLabels[index].stringValue = gift[@"note"];
+            _giftEffectLabels[index].stringValue = gift[@"effect"];
+            _giftUseButtons[index].enabled = count > 0;
         } else {
             _giftImageViews[index].image = nil;
             _giftPlaceholderLabels[index].hidden = NO;
@@ -739,11 +1185,22 @@ static NSTextField *AddTotalMetric(NSView *parent,
             _giftCountLabels[index].stringValue = @"—";
             _giftDateLabels[index].stringValue = @"首次发现：—";
             _giftNoteLabels[index].stringValue = @"多涅还没有找到它。";
+            _giftEffectLabels[index].stringValue = @"效果：—";
+            _giftUseButtons[index].enabled = NO;
         }
     }
     NSInteger seenGiftCount = [NSUserDefaults.standardUserDefaults integerForKey:@"seenGiftCount"];
-    [_sectionControl setLabel:_stats.totalGifts > seenGiftCount ? @"小箱子 ✨" : @"小箱子"
-                   forSegment:1];
+    [_sectionControl setLabel:_stats.totalFoundGifts > seenGiftCount ? @"小箱子 ✨" : @"小箱子"
+                   forSegment:2];
+}
+
+- (void)giveGift:(NSButton *)sender {
+    NSInteger index = sender.tag;
+    if (index < 0 || index >= (NSInteger)GiftDefinitions().count || !self.giftUseHandler) return;
+    NSString *identifier = GiftDefinitions()[index][@"id"];
+    sender.enabled = NO;
+    self.giftUseHandler(identifier);
+    [self refresh];
 }
 
 - (void)show {
@@ -758,12 +1215,14 @@ static NSTextField *AddTotalMetric(NSView *parent,
 }
 
 - (void)changeSection:(NSSegmentedControl *)sender {
-    BOOL showGifts = sender.selectedSegment == 1;
-    for (NSView *view in _journalSubviews) view.hidden = showGifts;
+    BOOL showMemory = sender.selectedSegment == 1;
+    BOOL showGifts = sender.selectedSegment == 2;
+    for (NSView *view in _journalSubviews) view.hidden = showMemory || showGifts;
+    _memoryView.hidden = !showMemory;
     _giftView.hidden = !showGifts;
     if (showGifts) {
-        [NSUserDefaults.standardUserDefaults setInteger:_stats.totalGifts forKey:@"seenGiftCount"];
-        [_sectionControl setLabel:@"小箱子" forSegment:1];
+        [NSUserDefaults.standardUserDefaults setInteger:_stats.totalFoundGifts forKey:@"seenGiftCount"];
+        [_sectionControl setLabel:@"小箱子" forSegment:2];
     }
 }
 
@@ -810,9 +1269,11 @@ static NSAttributedString *HelpContent(void) {
 
     AppendHelpParagraph(text, @"和她互动\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
     AppendHelpParagraph(text, @"•  单击她：挥爪\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
-    AppendHelpParagraph(text, @"•  双击她：跳一下\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
+    AppendHelpParagraph(text, @"•  连续点击：先挥爪，再哈气，第三次会转身走开\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  拖动她：移动到喜欢的位置，放下后她会生气哈气\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
-    AppendHelpParagraph(text, @"•  多戳她几下：她可能会不耐烦\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
+    AppendHelpParagraph(text, @"•  鼠标慢慢靠近：她可能故意转开脸，继续贴近还会躲开\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
+    AppendHelpParagraph(text, @"•  在她头顶轻轻移动：她可能接受摸头，也可能傲娇拒绝\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
+    AppendHelpParagraph(text, @"•  在她身旁把鼠标缓慢带向一边：她愿意时会跟着走一段\n", [NSFont systemFontOfSize:14.0], 4.0, YES);
     AppendHelpParagraph(text, @"•  在她附近快速晃动鼠标：她可能会盯住并扑过去\n", [NSFont systemFontOfSize:14.0], 10.0, YES);
     AppendHelpParagraph(text, @"扑到鼠标后，她会露出得意脸；扑空则会生气哈气。\n", [NSFont systemFontOfSize:14.0], 18.0, NO);
     AppendHelpParagraph(text, @"她偶尔会翻出一件小东西给你看，也可以从菜单选择“让她找找看”。\n", [NSFont systemFontOfSize:14.0], 18.0, NO);
@@ -824,14 +1285,14 @@ static NSAttributedString *HelpContent(void) {
     AppendHelpParagraph(text, @"•  菜单中的“让她睡觉 / 叫醒她”：手动切换睡眠\n", [NSFont systemFontOfSize:14.0], 10.0, YES);
 
     AppendHelpParagraph(text, @"多涅小记\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
-    AppendHelpParagraph(text, @"小记会记下陪伴时间、互动、扑扑结果、哈气和睡觉次数，也会展示她当前的五项状态：\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
+    AppendHelpParagraph(text, @"“小记”会展示今天的陪伴、摸头反应、扑扑结果、哈气、睡觉和她当前的五项状态；“回忆”会整理从相遇至今的累计记录和行为习惯：\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
     AppendHelpParagraph(text, @"•  活力：影响她愿不愿意做活泼的动作\n", [NSFont systemFontOfSize:14.0], 3.0, YES);
     AppendHelpParagraph(text, @"•  脾气：受扑空、拖动和连续逗弄影响\n", [NSFont systemFontOfSize:14.0], 3.0, YES);
     AppendHelpParagraph(text, @"•  无聊：一段时间没有互动时会慢慢升高\n", [NSFont systemFontOfSize:14.0], 3.0, YES);
     AppendHelpParagraph(text, @"•  得意：扑到鼠标或翻到收藏时更容易升高\n", [NSFont systemFontOfSize:14.0], 3.0, YES);
     AppendHelpParagraph(text, @"•  亲近：在日常陪伴中慢慢积累\n", [NSFont systemFontOfSize:14.0], 8.0, YES);
     AppendHelpParagraph(text, @"这些状态会影响她的行动和扑击意愿。她偶尔冒出的傲娇颜文字，也会随当时的心情变化。\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
-    AppendHelpParagraph(text, @"“小箱子”会保存她找到的物品、收藏数量和首次发现日期。所有记录只保存在这台电脑上，不会上传。\n", [NSFont systemFontOfSize:14.0], 14.0, NO);
+    AppendHelpParagraph(text, @"“小箱子”会保存她找到的物品、当前持有数量和首次发现日期。你也可以把持有的物品送给她，每次消耗 1 件，并影响她当前的状态。所有记录只保存在这台电脑上，不会上传。\n", [NSFont systemFontOfSize:14.0], 14.0, NO);
 
     AppendHelpParagraph(text, @"调整宠物\n", [NSFont boldSystemFontOfSize:18.0], 8.0, NO);
     AppendHelpParagraph(text, @"点击菜单栏的 🐾，或者右键桑多涅，可以：\n", [NSFont systemFontOfSize:14.0], 8.0, NO);
@@ -1026,11 +1487,28 @@ static void ShowHelpWindow(void) {
     [bubble fill];
     [bubble stroke];
 
-    NSDictionary *attributes = @{
-        NSFontAttributeName: [NSFont boldSystemFontOfSize:16.0 * scale],
-        NSForegroundColorAttributeName: strokeColor
-    };
-    NSSize textSize = [self.text sizeWithAttributes:attributes];
+    CGFloat fontSize = 16.0 * scale;
+    CGFloat minimumFontSize = 8.0 * scale;
+    CGFloat availableWidth = NSWidth(bubbleRect) - 18.0 * scale;
+    NSDictionary *attributes;
+    NSSize textSize;
+    do {
+        attributes = @{
+            NSFontAttributeName: [NSFont boldSystemFontOfSize:fontSize],
+            NSForegroundColorAttributeName: strokeColor
+        };
+        textSize = [self.text sizeWithAttributes:attributes];
+        if (textSize.width <= availableWidth || fontSize <= minimumFontSize) break;
+        fontSize = MAX(minimumFontSize, fontSize - 0.5 * scale);
+    } while (YES);
+    if (textSize.width > availableWidth && textSize.width > 0.0) {
+        fontSize *= availableWidth / textSize.width;
+        attributes = @{
+            NSFontAttributeName: [NSFont boldSystemFontOfSize:fontSize],
+            NSForegroundColorAttributeName: strokeColor
+        };
+        textSize = [self.text sizeWithAttributes:attributes];
+    }
     NSPoint textPoint = NSMakePoint(NSMidX(bubbleRect) - textSize.width / 2.0,
                                     NSMidY(bubbleRect) - textSize.height / 2.0);
     [self.text drawAtPoint:textPoint withAttributes:attributes];
@@ -1084,12 +1562,20 @@ static void ShowHelpWindow(void) {
 - (void)toggleSleep;
 - (void)triggerGiftDiscovery;
 - (void)giftTapped;
+- (BOOL)giveGiftWithIdentifier:(NSString *)identifier;
 - (void)setCursorHuntEnabled:(BOOL)enabled;
 - (void)setVisibilityMode:(PetVisibilityMode)mode;
 - (void)setActivityLevel:(PetActivityLevel)level;
 - (void)petMouseDownAt:(NSPoint)location;
 - (void)petMouseDraggedTo:(NSPoint)location;
 - (void)petMouseUpWithClickCount:(NSInteger)clickCount;
+- (BOOL)updateSlowGuideWithPointer:(NSPoint)pointer
+                              delta:(NSPoint)delta
+                              speed:(CGFloat)speed
+                           distance:(CGFloat)distance
+                   previousDistance:(CGFloat)previousDistance;
+- (void)tickGuiding;
+- (void)finishGuiding;
 @end
 
 @implementation GiftBubbleView
@@ -1297,6 +1783,8 @@ static void ShowHelpWindow(void) {
     BOOL _hasLastPointer;
     NSPoint _lastPointer;
     NSPoint _lastPointerDelta;
+    CGFloat _lastPointerDistance;
+    BOOL _hasLastPointerDistance;
     CGFloat _lureScore;
     NSInteger _huntCooldownTicks;
     NSInteger _huntAnticipationTicks;
@@ -1304,8 +1792,23 @@ static void ShowHelpWindow(void) {
     BOOL _pounceActive;
     CGFloat _pounceStartX;
     CGFloat _pounceTargetX;
-    NSTimeInterval _lastPokeTime;
-    NSInteger _pokeCount;
+    CGFloat _slowApproachScore;
+    NSInteger _turnAwayTicks;
+    NSInteger _glanceBackTicks;
+    NSInteger _turnAwayStartDirection;
+    BOOL _cursorAttentionLocked;
+    NSInteger _pettingDwellTicks;
+    CGFloat _pettingTravel;
+    CGFloat _pettingRearmTravel;
+    NSInteger _pettingTicks;
+    BOOL _pettingArmed;
+    CGFloat _guideScore;
+    CGFloat _guideLeadTravel;
+    NSInteger _guideDirection;
+    BOOL _guidingActive;
+    NSInteger _guidingTicks;
+    NSInteger _guideCooldownTicks;
+    CGFloat _guidedPixels;
     BOOL _petIsVisible;
     BOOL _lastFullscreenDetected;
     NSInteger _fullscreenCheckClock;
@@ -1323,7 +1826,7 @@ static void ShowHelpWindow(void) {
     NSInteger _giftReactionTicks;
     NSInteger _giftCooldownTicks;
     NSDictionary<NSString *, id> *_currentGift;
-    NSTimeInterval _lastEmojiAt;
+    NSString *_giftUseAction;
 }
 
 - (void)useTickInterval:(NSTimeInterval)interval {
@@ -1343,8 +1846,13 @@ static void ShowHelpWindow(void) {
     _atlas = atlas;
     _stats = [[PetStats alloc] init];
     _statsWindowController = [[StatsWindowController alloc] initWithStats:_stats];
+    __weak PetController *weakSelf = self;
+    _statsWindowController.giftUseHandler = ^BOOL(NSString *identifier) {
+        return [weakSelf giveGiftWithIdentifier:identifier];
+    };
     _lastStatsTickTime = NSDate.timeIntervalSinceReferenceDate;
     _giftCooldownTicks = 24 * 8;
+    _pettingArmed = YES;
     double savedScale = [NSUserDefaults.standardUserDefaults doubleForKey:@"petScale"];
     _scale = savedScale == 0 ? kStandardPetScale
                              : MAX(kMinimumPetScale, MIN(kMaximumPetScale, savedScale));
@@ -1573,6 +2081,12 @@ static void ShowHelpWindow(void) {
 }
 
 - (void)startGiftDiscovery:(NSDictionary<NSString *, id> *)gift {
+    [self startGiftPresentation:gift recordDiscovery:YES useAction:nil];
+}
+
+- (void)startGiftPresentation:(NSDictionary<NSString *, id> *)gift
+               recordDiscovery:(BOOL)recordDiscovery
+                     useAction:(NSString *)useAction {
     if (!gift || _dragging || _dropping) return;
     [self cancelHunt];
     if (_sleeping) [self wakeFromSleep];
@@ -1582,17 +2096,33 @@ static void ShowHelpWindow(void) {
     _giftActive = YES;
     _giftTick = 0;
     _giftReactionTicks = 0;
+    _giftUseAction = useAction;
     _giftCooldownTicks = 24 * 240;
-    [_stats applyTraitEvent:@"gift"];
+    if (recordDiscovery) [_stats applyTraitEvent:@"gift"];
     _giftBubbleView.giftImage = GiftImageForDefinition(gift);
     _giftBubbleView.giftScale = 0.35;
     _giftBubbleView.giftOpacity = 0.0;
     _giftBubbleView.giftYOffset = 12.0;
     [self positionGiftPanel];
     if (_petIsVisible) [_giftPanel orderFront:nil];
-    [_stats recordGiftWithIdentifier:gift[@"id"]];
+    if (recordDiscovery) [_stats recordGiftWithIdentifier:gift[@"id"]];
     [_statsWindowController refreshIfVisible];
     [self showSpeechText:@"多涅？" duration:1.1];
+}
+
+- (BOOL)giveGiftWithIdentifier:(NSString *)identifier {
+    if (_dragging || _dropping) return NO;
+    NSDictionary<NSString *, id> *gift = nil;
+    for (NSDictionary<NSString *, id> *candidate in GiftDefinitions()) {
+        if ([candidate[@"id"] isEqualToString:identifier]) { gift = candidate; break; }
+    }
+    if (!gift || ![_stats consumeGiftAndApplyEffectWithIdentifier:identifier]) return NO;
+    NSString *action = [identifier isEqualToString:@"screw"] ? @"jump" :
+                       [identifier isEqualToString:@"gear"] ? @"wave" : @"proud";
+    [self noteInteraction];
+    [self startGiftPresentation:gift recordDiscovery:NO useAction:action];
+    [_statsWindowController refreshIfVisible];
+    return YES;
 }
 
 - (void)giftTapped {
@@ -1608,6 +2138,7 @@ static void ShowHelpWindow(void) {
     _giftActive = NO;
     _giftTick = 0;
     _giftReactionTicks = 0;
+    _giftUseAction = nil;
     _currentGift = nil;
     _giftBubbleView.giftImage = nil;
     _giftBubbleView.giftOpacity = 0.0;
@@ -1649,7 +2180,15 @@ static void ShowHelpWindow(void) {
     } else if (_giftTick < proudStartTick) {
         [self showRow:RowForMode(PetModeReview) column:(_giftTick / 5) % 6];
     } else {
-        _view.currentFrame = [_atlas proudFrameAtColumn:(_giftTick / 5) % 6];
+        if ([_giftUseAction isEqualToString:@"jump"]) {
+            [self showRow:RowForMode(PetModeJumping)
+                   column:(_giftTick / 4) % FrameCountForMode(PetModeJumping)];
+        } else if ([_giftUseAction isEqualToString:@"wave"]) {
+            [self showRow:RowForMode(PetModeWaving)
+                   column:(_giftTick / 5) % FrameCountForMode(PetModeWaving)];
+        } else {
+            _view.currentFrame = [_atlas proudFrameAtColumn:(_giftTick / 5) % 6];
+        }
         if (_giftTick == proudStartTick) {
             [self showSpeechText:[self decoratedSpeech:@"多涅。🎁" event:@"giftProud"] duration:2.0];
         }
@@ -1718,6 +2257,24 @@ static void ShowHelpWindow(void) {
     if (_mode == PetModeIdle) [self startSleeping];
 }
 
+- (BOOL)updateCursorAttentionLock {
+    if (_mode != PetModeIdle || _pointerHeld || _dragging || _dropping) {
+        _cursorAttentionLocked = NO;
+        return NO;
+    }
+    NSPoint pointer = NSEvent.mouseLocation;
+    NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
+    CGFloat distance = hypot(pointer.x - center.x, pointer.y - center.y);
+    CGFloat acquireRadius = _panel.frame.size.width * 1.8;
+    CGFloat releaseRadius = _panel.frame.size.width * 2.0;
+    _cursorAttentionLocked = distance <= (_cursorAttentionLocked ? releaseRadius : acquireRadius);
+    if (_cursorAttentionLocked) {
+        _lastInteractionTime = NSDate.timeIntervalSinceReferenceDate;
+        _sleepRequested = NO;
+    }
+    return _cursorAttentionLocked;
+}
+
 - (void)tickSleeping {
     _frameClock += 1;
     if (_frameClock >= 3) {
@@ -1765,6 +2322,7 @@ static void ShowHelpWindow(void) {
 - (void)petMouseDownAt:(NSPoint)location {
     if (_giftActive) [self cancelGiftPresentation];
     [self noteInteraction];
+    [self cancelTsunderePose];
     if (_huntAnticipationTicks > 0 || _pounceActive) {
         [self cancelHunt];
         [self setMode:PetModeIdle ticks:80 loops:0];
@@ -1790,7 +2348,6 @@ static void ShowHelpWindow(void) {
     [self clampToCurrentScreen];
     [_stats recordInteraction];
     if (wasDragging) {
-        _pokeCount = 0;
         [self savePosition];
         _dropping = YES;
         _dropTick = 0;
@@ -1798,22 +2355,13 @@ static void ShowHelpWindow(void) {
         return;
     }
     _dropping = NO;
-    if (clickCount >= 2) {
-        _pokeCount = 0;
-        [_stats applyTraitEvent:@"friendly"];
-        [self triggerJump];
-    } else if (clickCount == 1) {
-        NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
-        _pokeCount = (now - _lastPokeTime < 1.35) ? _pokeCount + 1 : 1;
-        _lastPokeTime = now;
-        if (_pokeCount >= 3) {
-            _pokeCount = 0;
-            [_stats applyTraitEvent:@"repeatedPoke"];
-            [self startHissWithLoops:2 event:@"hiss"];
-        } else {
-            [self triggerWave];
-        }
-    }
+    if (clickCount >= 3) {
+        [_stats applyTraitEvent:@"repeatedPoke"];
+        [self startDodgeFromPointer:NSEvent.mouseLocation];
+    } else if (clickCount == 2) {
+        [_stats applyTraitEvent:@"irritated"];
+        [self startHissWithLoops:2 event:@"hiss"];
+    } else if (clickCount == 1) [self triggerWave];
 }
 
 - (void)beginLongPressDrag {
@@ -1909,13 +2457,15 @@ static void ShowHelpWindow(void) {
     }
     if (_giftCooldownTicks > 0) _giftCooldownTicks -= 1;
     if (_huntCooldownTicks > 0) _huntCooldownTicks -= 1;
-    [self updateAutomaticSleep];
+    if (_guideCooldownTicks > 0) _guideCooldownTicks -= 1;
+    BOOL cursorControlsIdle = [self updateCursorAttentionLock];
+    if (!cursorControlsIdle) [self updateAutomaticSleep];
     if (_sleeping) {
         [self tickSleeping];
         return;
     }
     if (!_giftActive && _giftCooldownTicks <= 0 && !_paused &&
-        _activityLevel != PetActivityLevelQuiet && _mode == PetModeIdle &&
+        !cursorControlsIdle && _activityLevel != PetActivityLevelQuiet && _mode == PetModeIdle &&
         arc4random_uniform(360) == 0) {
         [self startGiftDiscovery:RandomGiftDefinition()];
     }
@@ -1923,7 +2473,19 @@ static void ShowHelpWindow(void) {
         [self tickGift];
         return;
     }
+    if (_pettingTicks > 0) {
+        [self tickPetting];
+        return;
+    }
+    if (_guidingActive) {
+        [self tickGuiding];
+        return;
+    }
     [self updateMouseHunt];
+    if (_pettingTicks > 0) {
+        [self tickPetting];
+        return;
+    }
     if (_huntAnticipationTicks > 0) {
         [self tickHuntAnticipation];
         return;
@@ -1964,7 +2526,7 @@ static void ShowHelpWindow(void) {
         [self showRow:RowForMode(_mode) column:_frameIndex];
     }
 
-    if (!_paused && !IsTransientMode(_mode)) {
+    if (!_paused && !IsTransientMode(_mode) && !(_mode == PetModeIdle && cursorControlsIdle)) {
         _phaseTicks -= 1;
         if (_phaseTicks <= 0) [self chooseNextRoamPhase];
     }
@@ -2042,6 +2604,9 @@ static void ShowHelpWindow(void) {
     if (!_hasLastPointer) {
         _hasLastPointer = YES;
         _lastPointer = pointer;
+        NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
+        _lastPointerDistance = hypot(pointer.x - center.x, pointer.y - center.y);
+        _hasLastPointerDistance = YES;
         return;
     }
 
@@ -2050,8 +2615,36 @@ static void ShowHelpWindow(void) {
     CGFloat dot = delta.x * _lastPointerDelta.x + delta.y * _lastPointerDelta.y;
     NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
     CGFloat distance = hypot(pointer.x - center.x, pointer.y - center.y);
+    CGFloat previousDistance = _hasLastPointerDistance ? _lastPointerDistance : distance;
     _lastPointer = pointer;
     _lastPointerDelta = delta;
+    _lastPointerDistance = distance;
+    _hasLastPointerDistance = YES;
+    BOOL pettingCaptured = _turnAwayTicks <= 0 && _glanceBackTicks <= 0 &&
+                           [self updatePettingWithPointer:pointer speed:speed];
+    BOOL guideCaptured = NO;
+    if (!pettingCaptured) {
+        guideCaptured = [self updateSlowGuideWithPointer:pointer
+                                                    delta:delta
+                                                    speed:speed
+                                                 distance:distance
+                                         previousDistance:previousDistance];
+    }
+    if (!pettingCaptured && !guideCaptured) {
+        [self updateTsundereWithPointer:pointer speed:speed distance:distance previousDistance:previousDistance];
+    }
+
+    if (pettingCaptured) {
+        _guideScore = 0.0;
+        _guideLeadTravel = 0.0;
+        _lureScore = MAX(0.0, _lureScore - 0.5);
+        return;
+    }
+
+    if (guideCaptured) {
+        _lureScore = MAX(0.0, _lureScore - 0.5);
+        return;
+    }
 
     if (!_cursorHuntEnabled || _paused || _huntCooldownTicks > 0 ||
         _huntAnticipationTicks > 0 || _pounceActive || _mode != PetModeIdle) {
@@ -2087,7 +2680,217 @@ static void ShowHelpWindow(void) {
     }
 }
 
+- (BOOL)updateSlowGuideWithPointer:(NSPoint)pointer
+                              delta:(NSPoint)delta
+                              speed:(CGFloat)speed
+                           distance:(CGFloat)distance
+                   previousDistance:(CGFloat)previousDistance {
+    if (_guidingActive) return YES;
+    if (_guideCooldownTicks > 0 || _mode != PetModeIdle || _paused || _pointerHeld ||
+        _turnAwayTicks > 0 || _glanceBackTicks > 0 || _huntAnticipationTicks > 0 || _pounceActive) {
+        _guideScore = MAX(0.0, _guideScore - 0.8);
+        _guideLeadTravel = 0.0;
+        return NO;
+    }
+    CGFloat width = _panel.frame.size.width;
+    NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
+    NSInteger direction = delta.x > 0.0 ? 1 : (delta.x < 0.0 ? -1 : 0);
+    BOOL pointerLeads = direction != 0 && ((pointer.x - center.x) * direction) > width * 0.38;
+    BOOL gentle = speed >= 0.7 && speed <= 7.5;
+    BOOL horizontal = fabs(delta.x) >= MAX(0.55, fabs(delta.y) * 1.35);
+    BOOL usefulRange = distance > width * 0.62 && distance < width * 1.8;
+    // Keep the two slow-pointer gestures unambiguous: moving inward belongs
+    // to the tsundere turn-away interaction; guiding only builds while the
+    // pointer clearly leads away from her.
+    BOOL movingAway = distance - previousDistance >= 0.35;
+    BOOL stableDirection = _guideDirection == 0 || _guideDirection == direction;
+    BOOL qualifies = pointerLeads && gentle && horizontal && usefulRange && movingAway && stableDirection;
+    if (qualifies) {
+        _guideDirection = direction;
+        _guideScore += 1.0;
+        _guideLeadTravel += fabs(delta.x);
+        _phaseTicks = MAX(_phaseTicks, 72);
+    } else {
+        _guideScore = MAX(0.0, _guideScore - 0.75);
+        if (!stableDirection || speed > 9.0 || !usefulRange) {
+            _guideDirection = 0;
+            _guideLeadTravel = 0.0;
+        }
+    }
+    if (_guideScore < 16.0 || _guideLeadTravel < 28.0 * _scale) return qualifies;
+
+    CGFloat vitality = _stats.vitality / 100.0;
+    CGFloat closeness = _stats.closeness / 100.0;
+    CGFloat boredom = _stats.boredom / 100.0;
+    CGFloat temper = _stats.temperValue / 100.0;
+    CGFloat willingness = MAX(0.18, MIN(0.90, 0.22 + 0.30 * vitality + 0.25 * closeness + 0.10 * boredom - 0.22 * temper));
+    _guideScore = 0.0;
+    _guideLeadTravel = 0.0;
+    if (RandomUnit() > willingness) {
+        _guideCooldownTicks = 72;
+        [self showSpeechText:[self decoratedSpeech:@"多涅。" event:@"turnAway"] duration:1.5];
+        return YES;
+    }
+    [self noteInteraction];
+    [_stats recordInteraction];
+    [self cancelHunt];
+    [self cancelTsunderePose];
+    _guidingActive = YES;
+    _guidingTicks = 120;
+    _guidedPixels = 0.0;
+    [self setMode:_guideDirection > 0 ? PetModeWalkRight : PetModeWalkLeft ticks:120 loops:0];
+    return YES;
+}
+
+- (void)finishGuiding {
+    if (!_guidingActive) return;
+    _guidingActive = NO;
+    _guideCooldownTicks = 48;
+    [_stats recordGuidedWalkBodyLengths:_guidedPixels / MAX(1.0, _panel.frame.size.width)];
+    _guidedPixels = 0.0;
+    _guideDirection = 0;
+    _hasLastPointer = NO;
+    [self startTimedIdle];
+}
+
+- (void)tickGuiding {
+    if (!_guidingActive) return;
+    NSPoint pointer = NSEvent.mouseLocation;
+    NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
+    CGFloat width = _panel.frame.size.width;
+    CGFloat horizontalGap = pointer.x - center.x;
+    CGFloat verticalGap = fabs(pointer.y - center.y);
+    CGFloat pointerStep = _hasLastPointer ? hypot(pointer.x - _lastPointer.x, pointer.y - _lastPointer.y) : 0.0;
+    _lastPointer = pointer;
+    _hasLastPointer = YES;
+    _guidingTicks -= 1;
+    if (_guidingTicks <= 0 || fabs(horizontalGap) < width * 0.42 || fabs(horizontalGap) > width * 1.9 ||
+        verticalGap > _panel.frame.size.height * 1.15 || pointerStep > 13.0) {
+        [self finishGuiding];
+        return;
+    }
+    NSInteger desiredDirection = horizontalGap > 0.0 ? 1 : -1;
+    if (desiredDirection != _guideDirection) {
+        [self finishGuiding];
+        return;
+    }
+    PetMode desiredMode = desiredDirection > 0 ? PetModeWalkRight : PetModeWalkLeft;
+    if (_mode != desiredMode) [self setMode:desiredMode ticks:MAX(1, _guidingTicks) loops:0];
+    NSScreen *screen = [self screenForPanel];
+    NSRect area = screen ? screen.visibleFrame : NSScreen.mainScreen.visibleFrame;
+    CGFloat step = 2.1 * _scale * desiredDirection;
+    NSPoint origin = _panel.frame.origin;
+    CGFloat nextX = MAX(NSMinX(area), MIN(NSMaxX(area) - width, origin.x + step));
+    CGFloat moved = fabs(nextX - origin.x);
+    if (moved < 0.1) {
+        [self finishGuiding];
+        return;
+    }
+    origin.x = nextX;
+    [_panel setFrameOrigin:origin];
+    _guidedPixels += moved;
+    _frameClock += 1;
+    if (_frameClock >= 3) {
+        _frameClock = 0;
+        _frameIndex = (_frameIndex + 1) % FrameCountForMode(_mode);
+    }
+    [self showRow:RowForMode(_mode) column:_frameIndex];
+}
+
+- (BOOL)pointerInHeadZone:(NSPoint)pointer {
+    NSRect bounds = _panel.frame;
+    CGFloat normalizedX = (pointer.x - NSMinX(bounds)) / MAX(1.0, NSWidth(bounds));
+    CGFloat normalizedY = (pointer.y - NSMinY(bounds)) / MAX(1.0, NSHeight(bounds));
+    CGFloat dx = (normalizedX - 0.36) / 0.34;
+    CGFloat dy = (normalizedY - 0.57) / 0.28;
+    return dx * dx + dy * dy <= 1.0;
+}
+
+- (BOOL)updatePettingWithPointer:(NSPoint)pointer speed:(CGFloat)speed {
+    if (_mode != PetModeIdle || _paused || _pointerHeld) {
+        _pettingDwellTicks = 0;
+        _pettingTravel = 0.0;
+        return NO;
+    }
+    BOOL inHeadZone = [self pointerInHeadZone:pointer];
+    if (!inHeadZone) {
+        _pettingDwellTicks = 0;
+        _pettingTravel = 0.0;
+        _pettingRearmTravel = 0.0;
+        _pettingArmed = YES;
+        return NO;
+    }
+    if (!_pettingArmed) {
+        if (speed >= 0.8) _pettingRearmTravel += MIN(speed, 12.0);
+        if (_pettingRearmTravel >= 16.0) {
+            _pettingArmed = YES;
+            _pettingRearmTravel = 0.0;
+            _pettingDwellTicks = 0;
+            _pettingTravel = 0.0;
+        }
+        return YES;
+    }
+    _pettingDwellTicks += 1;
+    _pettingTravel += MIN(speed, 12.0);
+    BOOL deliberateStroke = _pettingDwellTicks >= 14 && _pettingTravel >= 28.0;
+    BOOL calmHover = _pettingDwellTicks >= 60;
+    if (deliberateStroke || calmHover) [self triggerPettingResponse];
+    return YES;
+}
+
+- (void)triggerPettingResponse {
+    _pettingDwellTicks = 0;
+    _pettingTravel = 0.0;
+    _pettingRearmTravel = 0.0;
+    _pettingArmed = NO;
+    [self noteInteraction];
+    [_stats recordInteraction];
+    [self cancelHunt];
+    [self cancelTsunderePose];
+    CGFloat acceptance = MAX(0.10, MIN(0.85,
+        0.25 + 0.55 * (_stats.closeness / 100.0) - 0.35 * (_stats.temperValue / 100.0)));
+    BOOL accepted = RandomUnit() < acceptance;
+    [_stats recordPettingAccepted:accepted];
+    if (accepted) {
+        [_stats applyTraitEvent:@"petted"];
+        _pettingTicks = 54;
+        [self showSpeechText:[self decoratedSpeech:@"多涅多涅~" event:@"proud"] duration:1.9];
+        return;
+    }
+    [_stats applyTraitEvent:@"irritated"];
+    if (RandomUnit() < _stats.temperValue / 100.0) {
+        [self startHissWithLoops:2];
+    } else {
+        [self setMode:PetModeWaving ticks:90 loops:1];
+        [self showSpeechText:[self decoratedSpeech:@"多涅。" event:@"dodge"] duration:1.6];
+    }
+}
+
+- (void)tickPetting {
+    NSInteger elapsed = 54 - _pettingTicks + 1;
+    _pettingTicks -= 1;
+    CGFloat fadeIn = MIN(1.0, elapsed / 8.0);
+    CGFloat fadeOut = MIN(1.0, MAX(0, _pettingTicks) / 8.0);
+    CGFloat envelope = MIN(fadeIn, fadeOut);
+    CGFloat breath = sin(elapsed * 0.28);
+    CGFloat sway = sin(elapsed * 0.34);
+    _view.visualScaleX = 1.0 + envelope * (0.018 + breath * 0.006);
+    _view.visualScaleY = 1.0 - envelope * (0.014 - breath * 0.005);
+    _view.visualYOffset = envelope * (1.8 + breath * 1.2) * _scale;
+    _view.visualRotation = envelope * sway * 0.012;
+    [self showRow:RowForMode(PetModeIdle) column:3];
+    if (_pettingTicks > 0) return;
+    _view.visualScaleX = 1.0;
+    _view.visualScaleY = 1.0;
+    _view.visualYOffset = 0.0;
+    _view.visualRotation = 0.0;
+    _hasLastPointer = NO;
+    _hasLastPointerDistance = NO;
+    [self startTimedIdle];
+}
+
 - (void)beginHuntAt:(NSPoint)pointer {
+    [self cancelTsunderePose];
     _lureScore = 0.0;
     _huntTarget = pointer;
     _huntAnticipationTicks = 11;
@@ -2222,10 +3025,8 @@ static void ShowHelpWindow(void) {
     CGFloat b = _stats.boredom / 100.0;
     CGFloat p = _stats.pride / 100.0;
     CGFloat c = _stats.closeness / 100.0;
-    CGFloat livelyIdle = _activityLevel == PetActivityLevelLively ? 0.72 : 1.0;
-    NSArray<NSString *> *actions = @[@"idle", @"right", @"left", @"wave", @"jump", @"hiss"];
+    NSArray<NSString *> *actions = @[@"right", @"left", @"wave", @"jump", @"hiss"];
     NSArray<NSNumber *> *weights = @[
-        @(25.0 * (1.25 - 0.55 * v) * (1.15 - 0.35 * b) * livelyIdle),
         @(20.0 * (0.35 + 0.65 * v) * (0.55 + 0.45 * b)),
         @(20.0 * (0.35 + 0.65 * v) * (0.55 + 0.45 * b)),
         @(15.0 * (0.25 + 0.45 * c + 0.30 * b) * (1.0 - 0.35 * a)),
@@ -2240,8 +3041,7 @@ static void ShowHelpWindow(void) {
         roll -= weights[index].doubleValue;
         if (roll < 0.0) { action = actions[index]; break; }
     }
-    if ([action isEqualToString:@"idle"]) [self startTimedIdle];
-    else if ([action isEqualToString:@"right"] || [action isEqualToString:@"left"]) {
+    if ([action isEqualToString:@"right"] || [action isEqualToString:@"left"]) {
         [_stats applyTraitEvent:@"walk"];
         [self setMode:[action isEqualToString:@"right"] ? PetModeWalkRight : PetModeWalkLeft
                 ticks:RandomBetween(72, 120) loops:0];
@@ -2258,6 +3058,13 @@ static void ShowHelpWindow(void) {
 }
 
 - (void)setMode:(PetMode)newMode ticks:(NSInteger)ticks loops:(NSInteger)loops {
+    if (_guidingActive && newMode != PetModeWalkLeft && newMode != PetModeWalkRight) {
+        _guidingActive = NO;
+        [_stats recordGuidedWalkBodyLengths:_guidedPixels / MAX(1.0, _panel.frame.size.width)];
+        _guidedPixels = 0.0;
+        _guideDirection = 0;
+        _guideCooldownTicks = 48;
+    }
     if (_mode == PetModeJumping && newMode != PetModeJumping) {
         NSPoint origin = _panel.frame.origin;
         origin.y = _jumpBaseY;
@@ -2269,6 +3076,13 @@ static void ShowHelpWindow(void) {
         [_panel setFrameOrigin:origin];
     }
     _mode = newMode;
+    if (newMode != PetModeIdle) {
+        _pettingTicks = 0;
+        _pettingDwellTicks = 0;
+        _pettingTravel = 0.0;
+        _cursorAttentionLocked = NO;
+        [self cancelTsunderePose];
+    }
     _view.visualScaleX = 1.0;
     _view.visualScaleY = 1.0;
     _view.visualYOffset = 0.0;
@@ -2287,6 +3101,23 @@ static void ShowHelpWindow(void) {
 - (void)renderIdleOrLook {
     NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
     NSPoint pointer = NSEvent.mouseLocation;
+    if (_turnAwayTicks > 0) {
+        NSInteger elapsed = kTurnAwayTicks - _turnAwayTicks;
+        NSInteger step = MIN(8, elapsed / kTurnDirectionFrameTicks);
+        [self showLookDirection:(_turnAwayStartDirection + step) % 16];
+        return;
+    }
+    if (_glanceBackTicks > 0) {
+        NSInteger elapsed = kGlanceBackTicks - _glanceBackTicks;
+        NSInteger step = MIN(8, elapsed / kTurnDirectionFrameTicks);
+        _glanceBackTicks -= 1;
+        [self showLookDirection:(_turnAwayStartDirection + 8 - step + 16) % 16];
+        return;
+    }
+    if (_slowApproachScore > 0.0) {
+        [self renderLookAtPointer:pointer opposite:NO];
+        return;
+    }
     CGFloat dx = pointer.x - center.x;
     CGFloat dy = pointer.y - center.y;
     if (hypot(dx, dy) < 85.0 || _idleLookClock % 96 < 34) {
@@ -2300,13 +3131,100 @@ static void ShowHelpWindow(void) {
     else [self showRow:10 column:direction - 8];
 }
 
+- (void)renderLookAtPointer:(NSPoint)pointer opposite:(BOOL)opposite {
+    NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
+    CGFloat degrees = atan2(pointer.x - center.x, pointer.y - center.y) * 180.0 / M_PI;
+    if (degrees < 0) degrees += 360.0;
+    NSInteger direction = ((NSInteger)llround(degrees / 22.5)) % 16;
+    if (opposite) direction = (direction + 8) % 16;
+    [self showLookDirection:direction];
+}
+
+- (void)showLookDirection:(NSInteger)direction {
+    direction = (direction % 16 + 16) % 16;
+    if (direction < 8) [self showRow:9 column:direction];
+    else [self showRow:10 column:direction - 8];
+}
+
+- (void)updateTsundereWithPointer:(NSPoint)pointer
+                             speed:(CGFloat)speed
+                          distance:(CGFloat)distance
+                  previousDistance:(CGFloat)previousDistance {
+    CGFloat outerRadius = _panel.frame.size.width * 1.8;
+    CGFloat innerRadius = _panel.frame.size.width * 0.55;
+    if (_turnAwayTicks > 0) {
+        if (!_pointerHeld && distance < innerRadius && speed < 8.0) {
+            [self startDodgeFromPointer:pointer];
+            return;
+        }
+        if (distance > outerRadius * 1.05 && previousDistance <= outerRadius * 1.05) {
+            _turnAwayTicks = 0;
+            _glanceBackTicks = kGlanceBackTicks;
+            _phaseTicks = MAX(_phaseTicks, kGlanceBackTicks);
+            return;
+        }
+        _turnAwayTicks -= 1;
+        if (_turnAwayTicks <= 0) {
+            _glanceBackTicks = kGlanceBackTicks;
+            _phaseTicks = MAX(_phaseTicks, kGlanceBackTicks);
+        }
+        return;
+    }
+    if (_mode != PetModeIdle || _paused || _pointerHeld ||
+        _huntAnticipationTicks > 0 || _pounceActive) {
+        _slowApproachScore = MAX(0.0, _slowApproachScore - 0.8);
+        return;
+    }
+    BOOL inRange = distance > innerRadius && distance < outerRadius;
+    BOOL approaching = previousDistance - distance > 0.1 && speed >= 0.25 && speed < 8.0;
+    BOOL hovering = distance < outerRadius * 0.78 && speed < 1.25;
+    if (inRange && approaching) _slowApproachScore += 1.0;
+    else if (inRange && hovering && _slowApproachScore >= 3.0) _slowApproachScore += 0.45;
+    else _slowApproachScore = MAX(0.0, _slowApproachScore - 0.6);
+
+    // Once she notices a deliberate slow approach, keep the idle phase alive
+    // long enough for the interaction to resolve instead of roaming away.
+    if (_slowApproachScore > 0.0) _phaseTicks = MAX(_phaseTicks, kTurnAwayTicks);
+
+    CGFloat threshold = 15.0 - 4.0 * (_stats.pride / 100.0) - 2.0 * (_stats.temperValue / 100.0);
+    if (_slowApproachScore < threshold) return;
+    _slowApproachScore = 0.0;
+    _turnAwayTicks = kTurnAwayTicks;
+    CGFloat degrees = atan2(pointer.x - NSMidX(_panel.frame), pointer.y - NSMidY(_panel.frame)) * 180.0 / M_PI;
+    if (degrees < 0) degrees += 360.0;
+    _turnAwayStartDirection = ((NSInteger)llround(degrees / 22.5)) % 16;
+    _phaseTicks = MAX(_phaseTicks, kTurnAwayTicks);
+    [self showSpeechText:[self decoratedSpeech:@"多涅。" event:@"turnAway"] duration:1.8];
+}
+
+- (void)startDodgeFromPointer:(NSPoint)pointer {
+    NSPoint center = NSMakePoint(NSMidX(_panel.frame), NSMidY(_panel.frame));
+    NSScreen *screen = [self screenForPanel];
+    NSRect area = screen ? screen.visibleFrame : NSScreen.mainScreen.visibleFrame;
+    CGFloat leftSpace = NSMinX(_panel.frame) - NSMinX(area);
+    CGFloat rightSpace = NSMaxX(area) - NSMaxX(_panel.frame);
+    CGFloat minimumSpace = _panel.frame.size.width * 0.65;
+    PetMode mode = pointer.x < center.x ? PetModeWalkRight : PetModeWalkLeft;
+    if (mode == PetModeWalkLeft && leftSpace < minimumSpace && rightSpace > leftSpace) mode = PetModeWalkRight;
+    if (mode == PetModeWalkRight && rightSpace < minimumSpace && leftSpace > rightSpace) mode = PetModeWalkLeft;
+    NSInteger ticks = (NSInteger)llround(52.0 - 20.0 * (_stats.closeness / 100.0));
+    [self cancelHunt];
+    [self cancelTsunderePose];
+    [self setMode:mode ticks:ticks loops:0];
+    [self showSpeechText:[self decoratedSpeech:@"多涅。" event:@"dodge"] duration:1.6];
+}
+
+- (void)cancelTsunderePose {
+    _slowApproachScore = 0.0;
+    _turnAwayTicks = 0;
+    _glanceBackTicks = 0;
+}
+
 - (void)showRow:(NSInteger)row column:(NSInteger)column {
     _view.currentFrame = [_atlas frameAtRow:row column:column];
 }
 
 - (NSString *)decoratedSpeech:(NSString *)base event:(NSString *)event {
-    NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
-    if (now - _lastEmojiAt < 30.0) return base;
     CGFloat a = _stats.temperValue / 100.0;
     CGFloat p = _stats.pride / 100.0;
     CGFloat c = _stats.closeness / 100.0;
@@ -2325,6 +3243,14 @@ static void ShowHelpWindow(void) {
         [candidates addObject:@{@"score": @(MAX(0.02, c * (1.0 - a) * 0.16)),
                                 @"emoji": @"(⁄ ⁄•⁄-⁄•⁄ ⁄)"}];
     }
+    if ([event isEqualToString:@"turnAway"]) {
+        [candidates addObject:@{ @"score": @(MAX(0.08, 0.65 * p + 0.35 * a)),
+                                 @"emoji": @"(˘^˘)" }];
+    }
+    if ([event isEqualToString:@"dodge"]) {
+        [candidates addObject:@{ @"score": @(MAX(0.08, 0.70 * a + 0.30 * p)),
+                                 @"emoji": @"(￣ヘ￣)" }];
+    }
     if (candidates.count == 0) return base;
     CGFloat strongest = 0.0;
     CGFloat total = 0.0;
@@ -2342,7 +3268,6 @@ static void ShowHelpWindow(void) {
         roll -= [candidate[@"score"] doubleValue];
         if (roll < 0.0) { selected = candidate; break; }
     }
-    _lastEmojiAt = now;
     return [NSString stringWithFormat:@"%@ %@", base, selected[@"emoji"]];
 }
 

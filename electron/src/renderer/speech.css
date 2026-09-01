@@ -27,6 +27,8 @@ html, body {
   white-space: nowrap;
 }
 
+.bubble span { display: block; max-width: 100%; white-space: nowrap; }
+
 .bubble::before,
 .bubble::after {
   content: "";

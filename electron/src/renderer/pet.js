@@ -22,7 +22,21 @@ function loadImage(url) {
 
 function renderFrame(frame) {
   context.clearRect(0, 0, canvas.width, canvas.height);
-  if (frame.kind === 'sheet' && atlas.spritesheet) {
+  if (frame.kind === 'petting' && atlas.spritesheet) {
+    const envelope = Math.max(0, Math.min(1, frame.envelope || 0));
+    const breath = Number(frame.breath) || 0;
+    const sway = Number(frame.sway) || 0;
+    const scaleX = 1 + envelope * (0.018 + breath * 0.006);
+    const scaleY = 1 - envelope * (0.014 - breath * 0.005);
+    const y = envelope * (1.8 + breath * 1.2);
+    context.save();
+    context.translate(96, 104 + y);
+    context.rotate(envelope * sway * 0.012);
+    context.scale(scaleX, scaleY);
+    context.drawImage(atlas.spritesheet, frame.column * 192, frame.row * 208, 192, 208,
+      -96, -104, 192, 208);
+    context.restore();
+  } else if (frame.kind === 'sheet' && atlas.spritesheet) {
     context.drawImage(atlas.spritesheet, frame.column * 192, frame.row * 208, 192, 208, 0, 0, 192, 208);
   } else if (frame.kind === 'proud' && atlas.proud[frame.column]) {
     context.drawImage(atlas.proud[frame.column], 0, 0, 192, 208);
@@ -59,7 +73,7 @@ const engine = new PetEngine({
   moveTo: (x, y) => window.petAPI.moveTo(x, y),
   speech: (text, duration) => window.petAPI.showSpeech(text, duration),
   hideSpeech: () => window.petAPI.hideSpeech(),
-  record: (metric) => window.petAPI.record(metric),
+  record: (metric, amount = 1) => window.petAPI.record(metric, amount),
   mood: (traits) => window.petAPI.saveMood(traits),
   gift: (presentation) => window.petAPI.gift(presentation),
   savePosition: () => window.petAPI.savePosition(),
@@ -121,6 +135,7 @@ window.petAPI.onMoveResult((result) => engine.confirmMove(result));
 window.petAPI.onCommand((command) => {
   if (command.type === 'action') engine.trigger(command.value);
   else if (command.type === 'giftTap') engine.giftTapped();
+  else if (command.type === 'giveGift') engine.receiveGift(command.value);
   else if (command.type === 'settings') engine.applySettings(command.value);
   else if (command.type === 'traits') engine.replaceTraits(command.value);
   else if (command.type === 'visibility') engine.updateEnvironment({ visible: command.value });

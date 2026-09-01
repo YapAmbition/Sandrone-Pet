@@ -4,7 +4,13 @@ const EMPTY_METRICS = Object.freeze({
   caught: 0,
   missed: 0,
   hisses: 0,
-  sleeps: 0
+  sleeps: 0,
+  pettings: 0,
+  pettingAccepted: 0,
+  pettingRejected: 0,
+  bestPettingStreak: 0,
+  guidedWalks: 0,
+  guidedBodyLengths: 0
 });
 
 const DEFAULT_TRAITS = Object.freeze({
@@ -40,10 +46,13 @@ class PetStats {
       total: { ...EMPTY_METRICS, ...(stored.total || {}) },
       gifts: {
         counts: { ...(stored.gifts?.counts || {}) },
-        firstFound: { ...(stored.gifts?.firstFound || {}) }
+        firstFound: { ...(stored.gifts?.firstFound || {}) },
+        totalFound: { ...(stored.gifts?.totalFound || stored.gifts?.counts || {}) }
       },
       traits: normalizeTraits(stored.traits)
     };
+    this.todayPettingStreak = Math.max(0, Number(stored.todayPettingStreak) || 0);
+    this.totalPettingStreak = Math.max(0, Number(stored.totalPettingStreak) || 0);
     this.pendingCompanionSeconds = 0;
     this.ensureCurrentDay();
   }
@@ -53,6 +62,7 @@ class PetStats {
     if (this.data.dayKey === today) return;
     this.data.dayKey = today;
     this.data.today = { ...EMPTY_METRICS };
+    this.todayPettingStreak = 0;
     this.save();
   }
 
@@ -69,14 +79,57 @@ class PetStats {
     }
   }
 
+  recordPetting(accepted) {
+    this.ensureCurrentDay();
+    this.data.today.pettings += 1;
+    this.data.total.pettings += 1;
+    if (accepted) {
+      this.data.today.pettingAccepted += 1;
+      this.data.total.pettingAccepted += 1;
+      this.todayPettingStreak += 1;
+      this.totalPettingStreak += 1;
+      this.data.today.bestPettingStreak = Math.max(this.data.today.bestPettingStreak, this.todayPettingStreak);
+      this.data.total.bestPettingStreak = Math.max(this.data.total.bestPettingStreak, this.totalPettingStreak);
+    } else {
+      this.data.today.pettingRejected += 1;
+      this.data.total.pettingRejected += 1;
+      this.todayPettingStreak = 0;
+      this.totalPettingStreak = 0;
+    }
+    this.save();
+  }
+
+  recordGuidedWalk(bodyLengths) {
+    const amount = Number(bodyLengths);
+    if (!Number.isFinite(amount) || amount < 0.35) return;
+    this.ensureCurrentDay();
+    this.data.today.guidedWalks += 1;
+    this.data.total.guidedWalks += 1;
+    this.data.today.guidedBodyLengths += amount;
+    this.data.total.guidedBodyLengths += amount;
+    this.save();
+  }
+
   recordGift(identifier, date = new Date()) {
     if (typeof identifier !== 'string' || !identifier) return;
     const counts = this.data.gifts.counts;
     counts[identifier] = Math.max(0, Number(counts[identifier]) || 0) + 1;
+    const totalFound = this.data.gifts.totalFound;
+    totalFound[identifier] = Math.max(0, Number(totalFound[identifier]) || 0) + 1;
     if (!this.data.gifts.firstFound[identifier]) {
       this.data.gifts.firstFound[identifier] = date.toISOString();
     }
     this.save();
+  }
+
+  consumeGift(identifier) {
+    if (typeof identifier !== 'string' || !identifier) return false;
+    const counts = this.data.gifts.counts;
+    const current = Math.max(0, Number(counts[identifier]) || 0);
+    if (current < 1) return false;
+    counts[identifier] = current - 1;
+    this.save();
+    return true;
   }
 
   setTraits(value) {
@@ -94,16 +147,22 @@ class PetStats {
       dayKey: localDayKey(),
       today: { ...EMPTY_METRICS },
       total: { ...EMPTY_METRICS },
-      gifts: { counts: {}, firstFound: {} },
+      gifts: { counts: {}, firstFound: {}, totalFound: {} },
       traits: normalizeTraits()
     };
     this.pendingCompanionSeconds = 0;
+    this.todayPettingStreak = 0;
+    this.totalPettingStreak = 0;
     this.save();
   }
 
   save() {
     this.pendingCompanionSeconds = 0;
-    this.store.set('stats', this.data);
+    this.store.set('stats', {
+      ...this.data,
+      todayPettingStreak: this.todayPettingStreak,
+      totalPettingStreak: this.totalPettingStreak
+    });
   }
 }
 

@@ -39,6 +39,7 @@ test('gift counts and first discovery date are persisted', () => {
   stats.recordGift('screw', new Date('2026-08-28T12:00:00.000Z'));
   const snapshot = stats.snapshot();
   assert.equal(snapshot.gifts.counts.screw, 2);
+  assert.equal(snapshot.gifts.totalFound.screw, 2);
   assert.equal(snapshot.gifts.firstFound.screw, discovered.toISOString());
   assert.equal(store.data.stats.gifts.counts.screw, 2);
 });
@@ -48,7 +49,19 @@ test('reset also clears the gift box', () => {
   const stats = new PetStats(store);
   stats.recordGift('ruby');
   stats.reset();
-  assert.deepEqual(stats.snapshot().gifts, { counts: {}, firstFound: {} });
+  assert.deepEqual(stats.snapshot().gifts, { counts: {}, firstFound: {}, totalFound: {} });
+});
+
+test('giving a gift consumes held inventory but preserves discovery history', () => {
+  const store = new MemoryStore();
+  const stats = new PetStats(store);
+  stats.recordGift('gear', new Date('2026-08-27T12:00:00.000Z'));
+  assert.equal(stats.consumeGift('gear'), true);
+  assert.equal(stats.consumeGift('gear'), false);
+  const snapshot = stats.snapshot();
+  assert.equal(snapshot.gifts.counts.gear, 0);
+  assert.equal(snapshot.gifts.totalFound.gear, 1);
+  assert.ok(snapshot.gifts.firstFound.gear);
 });
 
 test('traits are persisted and reset to their defaults', () => {
@@ -60,4 +73,20 @@ test('traits are persisted and reset to their defaults', () => {
   stats.reset();
   assert.equal(stats.snapshot().traits.vitality, 68);
   assert.equal(stats.snapshot().traits.temper, 22);
+});
+
+test('petting and guided walks keep today and lifetime interaction details', () => {
+  const store = new MemoryStore();
+  const stats = new PetStats(store);
+  stats.recordPetting(true);
+  stats.recordPetting(true);
+  stats.recordPetting(false);
+  stats.recordGuidedWalk(1.75);
+  const snapshot = stats.snapshot();
+  assert.equal(snapshot.today.pettings, 3);
+  assert.equal(snapshot.today.pettingAccepted, 2);
+  assert.equal(snapshot.today.pettingRejected, 1);
+  assert.equal(snapshot.today.bestPettingStreak, 2);
+  assert.equal(snapshot.total.guidedWalks, 1);
+  assert.equal(snapshot.total.guidedBodyLengths, 1.75);
 });

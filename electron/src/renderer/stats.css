@@ -17,7 +17,7 @@ header { display: flex; gap: 18px; align-items: center; margin-bottom: 16px; }
 h1 { margin: 0; font-size: 30px; line-height: 1.1; letter-spacing: -1px; }
 header p { margin: 6px 0 0; color: #858087; font-size: 13px; }
 .tabs {
-  width: 180px; margin: 0 auto 24px; display: grid; grid-template-columns: 1fr 1fr;
+  width: 240px; margin: 0 auto 24px; display: grid; grid-template-columns: repeat(3, 1fr);
   border: 1px solid #c9c6cb; border-radius: 8px; overflow: hidden;
 }
 .tab { border-radius: 0; padding: 5px 8px; background: transparent; font-weight: 650; }
@@ -34,14 +34,23 @@ small { display: block; color: #77727a; font-size: 12px; font-weight: 650; margi
 strong { display: block; color: #444147; font-size: 20px; line-height: 1.2; }
 .companion strong { font-size: 25px; }
 h2 { margin: 20px 4px 10px; font-size: 17px; }
+.lifetime-heading { display: flex; align-items: center; justify-content: space-between; }
+.lifetime-heading span { margin: 20px 4px 10px; color: #9653aa; font-size: 11px; font-weight: 700; }
+.section-heading { display: flex; align-items: center; justify-content: flex-start; }
+.section-heading h2 { margin-right: 2px; }
+.trait-help-button {
+  width: 25px; height: 25px; padding: 0; display: grid; place-items: center;
+  color: #aaa4ad; background: transparent; border-radius: 50%; font-size: 14px; line-height: 1;
+}
+.trait-help-button:hover { color: #765380; background: #eee7f1; }
 .traits {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 12px 22px; padding: 16px 20px;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 14px 16px;
   background: #eee9f1;
 }
-.trait { display: grid; grid-template-columns: 62px 1fr; gap: 9px; align-items: center; }
-.trait:last-child { grid-column: 1 / -1; }
-.trait > span { color: #666168; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.trait { min-width: 0; text-align: center; }
+.trait > span { display: block; color: #666168; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .trait-track { height: 8px; overflow: hidden; border-radius: 999px; background: #d7d2da; }
+.trait .trait-track { margin-top: 8px; }
 .trait-track i { display: block; width: 0; height: 100%; border-radius: inherit; transition: width 240ms ease; }
 .vitality i { background: #e6a83a; }
 .temper i { background: #d95a61; }
@@ -58,11 +67,33 @@ h2 { margin: 20px 4px 10px; font-size: 17px; }
 .orange { background: #f5eadc; }
 .red { background: #f7e1e0; }
 .indigo { background: #e8e6f3; }
-.totals {
-  display: grid; grid-template-columns: repeat(3, 1fr); row-gap: 20px; padding: 19px 20px;
-  background: #ececee;
+.memory-hero {
+  min-height: 80px; padding: 14px 24px; display: flex; align-items: center; gap: 18px;
+  background: #eee0f3;
 }
-.totals strong { font-size: 16px; }
+.memory-hero-main { flex: 1; }
+.memory-hero-main strong { font-size: 25px; }
+.memory-hero-equivalent { color: #9252a3; font-size: 12px; font-weight: 700; }
+.memory-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.memory-card {
+  min-height: 88px; padding: 14px 16px; border-radius: 16px; display: flex; align-items: center; gap: 13px;
+}
+.memory-card > span { width: 30px; text-align: center; font-size: 23px; }
+.memory-card > div { min-width: 0; }
+.memory-card strong { font-size: 17px; white-space: nowrap; }
+.memory-card em { display: block; margin-top: 5px; color: #9252a3; font-size: 10px; font-style: normal; font-weight: 700; white-space: nowrap; }
+.pink { background: #f3e3ed; }
+.teal { background: #def0ef; }
+.summary-strip {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 14px 12px;
+  background: #eee9f1;
+}
+.summary-strip > div { min-width: 0; text-align: center; }
+.summary-strip > div + div { border-left: 1px solid #d8d2db; }
+.summary-strip small { margin-bottom: 6px; }
+.summary-strip strong { font-size: 16px; }
+.memory-summary { background: #ececee; }
+.memory-footer { margin-top: 18px; justify-content: flex-start; }
 footer { margin: 17px 4px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 footer span { color: #aaa6ad; font-size: 11px; }
 button {
@@ -70,10 +101,14 @@ button {
   font: inherit; font-size: 12px; cursor: pointer;
 }
 button:hover { background: #d8d8db; }
-.gift-summary { margin: 50px 0 36px; text-align: center; font-size: 19px; font-weight: 750; }
-.gift-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 12px; }
+.gift-summary { margin: 20px 0 12px; text-align: center; font-size: 19px; font-weight: 750; }
+.gift-trait-title { margin-top: 0; }
+.gift-trait-title h2 { margin-top: 0; }
+.gift-traits { margin-bottom: 9px; padding-top: 13px; padding-bottom: 13px; }
+.gift-use-hint { margin: 0 0 13px; text-align: center; color: #8a858c; font-size: 11px; }
+.gift-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .gift-card {
-  min-height: 150px; padding: 17px 15px 13px; border-radius: 16px; background: #ececee;
+  min-height: 194px; padding: 14px 15px 11px; border-radius: 16px; background: #ececee;
   display: grid; grid-template-columns: 52px 1fr; grid-template-rows: auto auto 1fr; column-gap: 12px;
 }
 .gift-card img, .gift-placeholder { width: 52px; height: 52px; grid-row: 1 / span 2; object-fit: contain; }
@@ -83,7 +118,26 @@ button:hover { background: #d8d8db; }
 .gift-card .gift-detail { grid-column: 1 / -1; margin-top: 10px; }
 .gift-card .gift-date { display: block; color: #aaa6ad; font-size: 11px; margin-bottom: 7px; }
 .gift-card .gift-note { margin: 0; color: #69656c; font-size: 11px; line-height: 1.35; }
+.gift-card .gift-effect {
+  margin: 7px 0 0; color: #8b4ba0; font-size: 10px; line-height: 1.3; font-weight: 750;
+  white-space: pre-line;
+}
+.gift-card .gift-give { margin-top: 8px; width: 100%; padding: 6px 10px; background: #ded2e4; color: #6f477d; font-weight: 700; }
+.gift-card .gift-give:hover:not(:disabled) { background: #d5c3dc; }
+.gift-card .gift-give:disabled { opacity: .42; cursor: default; }
 .gift-footer { margin-top: 28px; justify-content: flex-start; }
+dialog {
+  width: min(420px, calc(100% - 48px)); padding: 20px; border: 0; border-radius: 18px;
+  color: #454348; background: #faf9fb; box-shadow: 0 18px 60px #302b3560;
+}
+dialog::backdrop { background: #28232d50; backdrop-filter: blur(2px); }
+.dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dialog-heading h2 { margin: 0; font-size: 18px; }
+#trait-help-close { padding: 2px 9px; border-radius: 999px; font-size: 20px; line-height: 1.2; }
+.trait-explanations { margin: 17px 0 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.trait-explanations li { display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: baseline; }
+.trait-explanations b { font-size: 12px; }
+.trait-explanations span { color: #716b74; font-size: 12px; line-height: 1.45; }
 
 @media (prefers-color-scheme: dark) {
   :root { color: #eee9ef; background: #222124; }
@@ -99,7 +153,13 @@ button:hover { background: #d8d8db; }
   .orange { background: #493a2d; }
   .red { background: #4b3031; }
   .indigo { background: #343246; }
-  .totals { background: #302f33; }
+  .memory-hero { background: #3f3044; }
+  .memory-hero-equivalent, .lifetime-heading span, .memory-card em { color: #d7a4e5; }
+  .summary-strip { background: #35313a; }
+  .summary-strip > div + div { border-left-color: #504a54; }
+  .memory-summary { background: #302f33; }
+  .pink { background: #46323f; }
+  .teal { background: #294341; }
   button { color: #e5dfe7; background: #3d3b40; }
   button:hover { background: #49464c; }
   .tabs { border-color: #5d5961; }
@@ -107,4 +167,10 @@ button:hover { background: #d8d8db; }
   .gift-card { background: #302f33; }
   .gift-card .gift-count { color: #aaa4ad; }
   .gift-card .gift-note { color: #c4bec7; }
+  .gift-card .gift-effect { color: #d9a6e8; }
+  .gift-card .gift-give { color: #f0dff5; background: #514358; }
+  .trait-help-button { color: #aaa4ad; }
+  .trait-help-button:hover { color: #eedaf4; background: #3c3540; }
+  dialog { color: #eee9ef; background: #2d2b30; box-shadow: 0 18px 60px #0009; }
+  .trait-explanations span { color: #c5bec8; }
 }

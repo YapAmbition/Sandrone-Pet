@@ -7,6 +7,7 @@ export const LONG_PRESS_MS = 250;
 import {
   DEFAULT_TRAITS,
   normalizeTraits,
+  applyGiftEffect,
   applyTraitEvent,
   driftTraits,
   roamWeights,
@@ -17,6 +18,9 @@ import {
 
 const LIFT_TICKS = 7;
 const DROP_TICKS = 8;
+const TURN_AWAY_TICKS = 72;
+const GLANCE_BACK_TICKS = 24;
+const TURN_DIRECTION_FRAME_TICKS = 2;
 
 const FRAME_COUNTS = {
   idle: 6,
@@ -104,6 +108,7 @@ export class PetEngine {
     this.hissTick = 0;
     this.lastPointer = null;
     this.lastPointerDelta = { x: 0, y: 0 };
+    this.lastPointerDistance = null;
     this.lureScore = 0;
     this.huntCooldownTicks = 0;
     this.huntAnticipationTicks = 0;
@@ -111,6 +116,23 @@ export class PetEngine {
     this.pounceActive = false;
     this.pounceStartX = 0;
     this.pounceTargetX = 0;
+    this.slowApproachScore = 0;
+    this.turnAwayTicks = 0;
+    this.glanceBackTicks = 0;
+    this.turnAwayStartDirection = 0;
+    this.cursorAttentionLocked = false;
+    this.pettingDwellTicks = 0;
+    this.pettingTravel = 0;
+    this.pettingRearmTravel = 0;
+    this.pettingTicks = 0;
+    this.pettingArmed = true;
+    this.guideScore = 0;
+    this.guideLeadTravel = 0;
+    this.guideDirection = 0;
+    this.guidingActive = false;
+    this.guidingTicks = 0;
+    this.guideCooldownTicks = 0;
+    this.guidedPixels = 0;
     this.lastInteractionTime = this.now();
     this.sleepRequested = false;
     this.sleeping = false;
@@ -123,11 +145,11 @@ export class PetEngine {
     this.giftActive = false;
     this.giftTick = 0;
     this.giftReactionTicks = 0;
+    this.giftUseAction = null;
     this.giftCooldownTicks = 24 * 8;
     this.traits = normalizeTraits(DEFAULT_TRAITS);
     this.lastTraitTickAt = this.now();
     this.lastMoodPublishAt = this.now();
-    this.lastEmojiAt = -Infinity;
   }
 
   initialize({ settings, bounds, workArea, gifts = [], traits }) {
@@ -190,6 +212,10 @@ export class PetEngine {
     const blockedRight = this.mode === 'walkRight' && errorX < -1.25;
 
     if (blockedLeft || blockedRight) {
+      if (this.guidingActive) {
+        this.finishGuiding();
+        return;
+      }
       this.blockedMoveTicks += 1;
       this.acceptedMoveTicks = 0;
       if (Math.abs(errorX) > 6 || this.blockedMoveTicks >= 2) {
@@ -243,12 +269,7 @@ export class PetEngine {
   }
 
   decorated(base, event) {
-    const result = decorateSpeech(base, event, this.traits, {
-      now: this.now(),
-      lastEmojiAt: this.lastEmojiAt
-    });
-    this.lastEmojiAt = result.lastEmojiAt;
-    return result;
+    return decorateSpeech(base, event, this.traits);
   }
 
   speak(base, event, duration, onlyWithEmoji = false) {
@@ -365,6 +386,7 @@ export class PetEngine {
 
   pointerDown(screenPoint) {
     this.noteInteraction();
+    this.cancelTsunderePose();
     if (this.huntAnticipationTicks > 0 || this.pounceActive) {
       this.cancelHunt();
       this.setMode('idle', 80, 0);
@@ -398,10 +420,10 @@ export class PetEngine {
     this.dropping = false;
     if (clickCount >= 3) {
       this.mutateTraits('repeatedPoke');
-      this.startHiss(2, 'hiss');
+      this.startDodgeFrom(this.environment.cursor);
     } else if (clickCount === 2) {
-      this.mutateTraits('friendly');
-      this.triggerJump();
+      this.mutateTraits('irritated');
+      this.startHiss(2, 'hiss');
     } else this.triggerWave();
     return false;
   }
@@ -426,14 +448,20 @@ export class PetEngine {
     if (this.dropping) return this.tickDrop();
     if (this.giftCooldownTicks > 0) this.giftCooldownTicks -= 1;
     if (this.huntCooldownTicks > 0) this.huntCooldownTicks -= 1;
-    this.updateAutomaticSleep();
+    if (this.guideCooldownTicks > 0) this.guideCooldownTicks -= 1;
+    const cursorControlsIdle = this.updateCursorAttentionLock();
+    if (!cursorControlsIdle) this.updateAutomaticSleep();
     if (this.sleeping) return this.tickSleeping();
     if (!this.giftActive && this.giftCooldownTicks <= 0 && !this.settings.paused &&
-        this.settings.activityLevel !== 'quiet' && this.mode === 'idle' && Math.floor(Math.random() * 360) === 0) {
+        !cursorControlsIdle && this.settings.activityLevel !== 'quiet' && this.mode === 'idle' &&
+        Math.floor(Math.random() * 360) === 0) {
       this.startGiftDiscovery(this.randomGift());
     }
     if (this.giftActive) return this.tickGift();
+    if (this.pettingTicks > 0) return this.tickPetting();
+    if (this.guidingActive) return this.tickGuiding();
     this.updateMouseHunt();
+    if (this.pettingTicks > 0) return this.tickPetting();
     if (this.huntAnticipationTicks > 0) return this.tickHuntAnticipation();
     if (this.mode === 'walkRight' || this.mode === 'walkLeft') this.moveHorizontally();
     if (this.mode === 'jumping') return this.tickJump();
@@ -465,7 +493,7 @@ export class PetEngine {
       this.hooks.render({ kind: 'sheet', row: ROWS[this.mode], column: this.frameIndex });
     }
 
-    if (!this.settings.paused && !transient(this.mode)) {
+    if (!this.settings.paused && !transient(this.mode) && !(this.mode === 'idle' && cursorControlsIdle)) {
       this.phaseTicks -= 1;
       if (this.phaseTicks <= 0) this.chooseNextRoamPhase();
     }
@@ -546,10 +574,31 @@ export class PetEngine {
     this.giftActive = true;
     this.giftTick = 0;
     this.giftReactionTicks = 0;
+    this.giftUseAction = null;
     this.giftCooldownTicks = 24 * 240;
     this.mutateTraits('gift');
     this.hooks.gift({ type: 'show', gift });
     this.hooks.speech('多涅？', 1100);
+  }
+
+  receiveGift(identifier) {
+    const gift = this.giftDefinitions.find((item) => item.id === identifier);
+    if (!gift || this.dragging || this.dropping) return false;
+    this.noteInteraction();
+    this.cancelHunt();
+    if (this.sleeping) this.wakeFromSleep();
+    this.cancelGiftPresentation();
+    this.setMode('review', Number.MAX_SAFE_INTEGER, 0);
+    this.giftActive = true;
+    this.giftTick = 0;
+    this.giftReactionTicks = 0;
+    this.giftUseAction = ({ screw: 'jump', gear: 'wave', feather: 'proud', ruby: 'proud' })[identifier] || 'proud';
+    this.traits = applyGiftEffect(this.traits, identifier, this.now());
+    this.lastMoodPublishAt = this.now();
+    this.hooks.mood(this.traits);
+    this.hooks.gift({ type: 'show', gift, record: false });
+    this.hooks.speech('多涅？', 1100);
+    return true;
   }
 
   giftTapped() {
@@ -567,6 +616,7 @@ export class PetEngine {
     this.giftActive = false;
     this.giftTick = 0;
     this.giftReactionTicks = 0;
+    this.giftUseAction = null;
     this.hooks.gift({ type: 'hide' });
   }
 
@@ -578,7 +628,15 @@ export class PetEngine {
     } else if (this.giftTick < 27) {
       this.hooks.render({ kind: 'sheet', row: ROWS.review, column: Math.floor(this.giftTick / 5) % 6 });
     } else {
-      this.hooks.render({ kind: 'proud', column: Math.floor(this.giftTick / 5) % 6 });
+      if (this.giftUseAction === 'jump') {
+        this.hooks.render({ kind: 'sheet', row: ROWS.jumping,
+          column: Math.floor(this.giftTick / 4) % FRAME_COUNTS.jumping });
+      } else if (this.giftUseAction === 'wave') {
+        this.hooks.render({ kind: 'sheet', row: ROWS.waving,
+          column: Math.floor(this.giftTick / 5) % FRAME_COUNTS.waving });
+      } else {
+        this.hooks.render({ kind: 'proud', column: Math.floor(this.giftTick / 5) % 6 });
+      }
       if (this.giftTick === 27) this.speak('多涅。🎁', 'giftProud', 2000);
     }
     if (this.giftTick < 144) return;
@@ -591,6 +649,23 @@ export class PetEngine {
     if (this.now() - this.lastInteractionTime < 60_000) return;
     this.sleepRequested = true;
     if (this.mode === 'idle') this.startSleeping();
+  }
+
+  updateCursorAttentionLock() {
+    if (this.mode !== 'idle' || this.pointerHeld || this.dragging || this.dropping) {
+      this.cursorAttentionLocked = false;
+      return false;
+    }
+    const pointerDistance = distance(this.environment.cursor, this.center());
+    const acquireRadius = this.environment.bounds.width * 1.8;
+    const releaseRadius = this.environment.bounds.width * 2.0;
+    this.cursorAttentionLocked = pointerDistance <=
+      (this.cursorAttentionLocked ? releaseRadius : acquireRadius);
+    if (this.cursorAttentionLocked) {
+      this.lastInteractionTime = this.now();
+      this.sleepRequested = false;
+    }
+    return this.cursorAttentionLocked;
   }
 
   tickSleeping() {
@@ -623,14 +698,36 @@ export class PetEngine {
     const pointer = this.environment.cursor;
     if (!this.lastPointer) {
       this.lastPointer = { ...pointer };
+      this.lastPointerDistance = distance(pointer, this.center());
       return;
     }
     const delta = { x: pointer.x - this.lastPointer.x, y: pointer.y - this.lastPointer.y };
     const speed = Math.hypot(delta.x, delta.y);
     const dot = delta.x * this.lastPointerDelta.x + delta.y * this.lastPointerDelta.y;
     const pointerDistance = distance(pointer, this.center());
+    const previousPointerDistance = this.lastPointerDistance;
     this.lastPointer = { ...pointer };
     this.lastPointerDelta = delta;
+    this.lastPointerDistance = pointerDistance;
+    const pettingCaptured = this.turnAwayTicks <= 0 && this.glanceBackTicks <= 0 &&
+      this.updatePetting(pointer, speed);
+    const guideCaptured = !pettingCaptured &&
+      this.updateSlowGuide(pointer, delta, speed, pointerDistance, previousPointerDistance);
+    if (!pettingCaptured && !guideCaptured) {
+      this.updateTsundereInteraction(pointer, speed, pointerDistance, previousPointerDistance);
+    }
+
+    if (pettingCaptured) {
+      this.guideScore = 0;
+      this.guideLeadTravel = 0;
+      this.lureScore = Math.max(0, this.lureScore - 0.5);
+      return;
+    }
+
+    if (guideCaptured) {
+      this.lureScore = Math.max(0, this.lureScore - 0.5);
+      return;
+    }
 
     if (!this.settings.cursorHuntEnabled || this.settings.paused || this.huntCooldownTicks > 0 ||
         this.huntAnticipationTicks > 0 || this.pounceActive || this.mode !== 'idle') {
@@ -656,7 +753,192 @@ export class PetEngine {
     }
   }
 
+  updateSlowGuide(pointer, delta, speed, pointerDistance, previousPointerDistance) {
+    if (this.guidingActive) return true;
+    if (this.guideCooldownTicks > 0 || this.mode !== 'idle' || this.settings.paused || this.pointerHeld ||
+        this.turnAwayTicks > 0 || this.glanceBackTicks > 0 || this.huntAnticipationTicks > 0 || this.pounceActive) {
+      this.guideScore = Math.max(0, this.guideScore - 0.8);
+      this.guideLeadTravel = 0;
+      return false;
+    }
+    const width = this.environment.bounds.width;
+    const center = this.center();
+    const direction = Math.sign(delta.x);
+    const pointerLeads = direction !== 0 && (pointer.x - center.x) * direction > width * 0.38;
+    const gentle = speed >= 0.7 && speed <= 7.5;
+    const horizontal = Math.abs(delta.x) >= Math.max(0.55, Math.abs(delta.y) * 1.35);
+    const usefulRange = pointerDistance > width * 0.62 && pointerDistance < width * 1.8;
+    // Moving inward is reserved for the tsundere turn-away gesture. Guiding
+    // only accumulates when the pointer is clearly leading away from her.
+    const movingAway = previousPointerDistance !== null && pointerDistance - previousPointerDistance >= 0.35;
+    const stableDirection = this.guideDirection === 0 || this.guideDirection === direction;
+    const qualifies = pointerLeads && gentle && horizontal && usefulRange && movingAway && stableDirection;
+    if (qualifies) {
+      this.guideDirection = direction;
+      this.guideScore += 1;
+      this.guideLeadTravel += Math.abs(delta.x);
+      this.phaseTicks = Math.max(this.phaseTicks, 72);
+    } else {
+      this.guideScore = Math.max(0, this.guideScore - 0.75);
+      if (!stableDirection || speed > 9 || !usefulRange) {
+        this.guideDirection = 0;
+        this.guideLeadTravel = 0;
+      }
+    }
+    if (this.guideScore < 16 || this.guideLeadTravel < 28 * this.settings.scale) return qualifies;
+
+    const willingness = clamp(0.22 + 0.30 * (this.traits.vitality / 100) +
+      0.25 * (this.traits.closeness / 100) + 0.10 * (this.traits.boredom / 100) -
+      0.22 * (this.traits.temper / 100), 0.18, 0.90);
+    this.guideScore = 0;
+    this.guideLeadTravel = 0;
+    if (Math.random() > willingness) {
+      this.guideCooldownTicks = 72;
+      this.speak('多涅。', 'turnAway', 1500);
+      return true;
+    }
+    this.noteInteraction();
+    this.hooks.record('interactions');
+    this.cancelHunt();
+    this.cancelTsunderePose();
+    this.guidingActive = true;
+    this.guidingTicks = 120;
+    this.guidedPixels = 0;
+    this.setMode(this.guideDirection > 0 ? 'walkRight' : 'walkLeft', 120, 0);
+    return true;
+  }
+
+  finishGuiding() {
+    if (!this.guidingActive) return;
+    this.guidingActive = false;
+    this.guideCooldownTicks = 48;
+    this.hooks.record('guidedWalk', this.guidedPixels / Math.max(1, this.environment.bounds.width));
+    this.guidedPixels = 0;
+    this.guideDirection = 0;
+    this.lastPointer = null;
+    this.startTimedIdle();
+  }
+
+  tickGuiding() {
+    const pointer = this.environment.cursor;
+    const center = this.center();
+    const width = this.environment.bounds.width;
+    const horizontalGap = pointer.x - center.x;
+    const verticalGap = Math.abs(pointer.y - center.y);
+    const pointerStep = this.lastPointer ? distance(pointer, this.lastPointer) : 0;
+    this.lastPointer = { ...pointer };
+    this.guidingTicks -= 1;
+    if (this.guidingTicks <= 0 || Math.abs(horizontalGap) < width * 0.42 ||
+        Math.abs(horizontalGap) > width * 1.9 || verticalGap > this.environment.bounds.height * 1.15 ||
+        pointerStep > 13) return this.finishGuiding();
+    const desiredDirection = Math.sign(horizontalGap);
+    if (desiredDirection !== this.guideDirection) return this.finishGuiding();
+    const desiredMode = desiredDirection > 0 ? 'walkRight' : 'walkLeft';
+    if (this.mode !== desiredMode) this.setMode(desiredMode, Math.max(1, this.guidingTicks), 0);
+    const area = this.environment.workArea;
+    const nextX = clamp(this.environment.bounds.x + 2.1 * this.settings.scale * desiredDirection,
+      area.x, area.x + area.width - width);
+    const moved = Math.abs(nextX - this.environment.bounds.x);
+    if (moved < 0.1) return this.finishGuiding();
+    this.moveTo(nextX, clamp(this.environment.bounds.y, area.y + 4,
+      area.y + area.height - this.environment.bounds.height));
+    this.guidedPixels += moved;
+    this.frameClock += 1;
+    if (this.frameClock >= 3) {
+      this.frameClock = 0;
+      this.frameIndex = (this.frameIndex + 1) % FRAME_COUNTS[this.mode];
+    }
+    this.hooks.render({ kind: 'sheet', row: ROWS[this.mode], column: this.frameIndex });
+  }
+
+  pointerInHeadZone(pointer) {
+    const bounds = this.environment.bounds;
+    const normalizedX = (pointer.x - bounds.x) / Math.max(1, bounds.width);
+    const normalizedY = (pointer.y - bounds.y) / Math.max(1, bounds.height);
+    const dx = (normalizedX - 0.36) / 0.34;
+    const dy = (normalizedY - 0.43) / 0.28;
+    return dx * dx + dy * dy <= 1;
+  }
+
+  updatePetting(pointer, speed) {
+    if (this.mode !== 'idle' || this.settings.paused || this.pointerHeld) {
+      this.pettingDwellTicks = 0;
+      this.pettingTravel = 0;
+      return false;
+    }
+    const inHeadZone = this.pointerInHeadZone(pointer);
+    if (!inHeadZone) {
+      this.pettingDwellTicks = 0;
+      this.pettingTravel = 0;
+      this.pettingRearmTravel = 0;
+      this.pettingArmed = true;
+      return false;
+    }
+    if (!this.pettingArmed) {
+      if (speed >= 0.8) this.pettingRearmTravel += Math.min(speed, 12);
+      if (this.pettingRearmTravel >= 16) {
+        this.pettingArmed = true;
+        this.pettingRearmTravel = 0;
+        this.pettingDwellTicks = 0;
+        this.pettingTravel = 0;
+      }
+      return true;
+    }
+    this.pettingDwellTicks += 1;
+    this.pettingTravel += Math.min(speed, 12);
+    const deliberateStroke = this.pettingDwellTicks >= 14 && this.pettingTravel >= 28;
+    const calmHover = this.pettingDwellTicks >= 60;
+    if (deliberateStroke || calmHover) this.triggerPettingResponse();
+    return true;
+  }
+
+  triggerPettingResponse() {
+    this.pettingDwellTicks = 0;
+    this.pettingTravel = 0;
+    this.pettingRearmTravel = 0;
+    this.pettingArmed = false;
+    this.noteInteraction();
+    this.hooks.record('interactions');
+    this.cancelHunt();
+    this.cancelTsunderePose();
+    const acceptance = clamp(0.25 + 0.55 * (this.traits.closeness / 100) -
+      0.35 * (this.traits.temper / 100), 0.1, 0.85);
+    const accepted = Math.random() < acceptance;
+    this.hooks.record(accepted ? 'pettingAccepted' : 'pettingRejected');
+    if (accepted) {
+      this.mutateTraits('petted');
+      this.pettingTicks = 54;
+      this.speak('多涅多涅~', 'proud', 1900);
+      return;
+    }
+    this.mutateTraits('irritated');
+    if (Math.random() < this.traits.temper / 100) {
+      this.startHiss(2, 'hiss');
+    } else {
+      this.setMode('waving', 90, 1);
+      this.speak('多涅。', 'dodge', 1600);
+    }
+  }
+
+  tickPetting() {
+    const elapsed = 54 - this.pettingTicks + 1;
+    this.pettingTicks -= 1;
+    const envelope = Math.min(1, elapsed / 8, Math.max(0, this.pettingTicks) / 8);
+    this.hooks.render({
+      kind: 'petting',
+      row: ROWS.idle,
+      column: 3,
+      envelope,
+      breath: Math.sin(elapsed * 0.28),
+      sway: Math.sin(elapsed * 0.34)
+    });
+    if (this.pettingTicks > 0) return;
+    this.lastPointer = null;
+    this.startTimedIdle();
+  }
+
   beginHunt(pointer) {
+    this.cancelTsunderePose();
     this.lureScore = 0;
     this.huntTarget = { ...pointer };
     this.huntAnticipationTicks = 11;
@@ -757,8 +1039,7 @@ export class PetEngine {
     if (this.mode !== 'idle') return this.startTimedIdle();
 
     const action = chooseWeighted(roamWeights(this.traits, this.settings.activityLevel));
-    if (action === 'idle') this.startTimedIdle();
-    else if (action === 'walkRight' || action === 'walkLeft') {
+    if (action === 'walkRight' || action === 'walkLeft') {
       this.mutateTraits('walk');
       this.setMode(action, randomBetween(72, 120), 0);
     } else if (action === 'wave') this.startWave();
@@ -774,9 +1055,23 @@ export class PetEngine {
   }
 
   setMode(mode, ticks, loops) {
+    if (this.guidingActive && !['walkLeft', 'walkRight'].includes(mode)) {
+      this.guidingActive = false;
+      this.hooks.record('guidedWalk', this.guidedPixels / Math.max(1, this.environment.bounds.width));
+      this.guidedPixels = 0;
+      this.guideDirection = 0;
+      this.guideCooldownTicks = 48;
+    }
     if (this.mode === 'jumping' && mode !== 'jumping') this.moveTo(this.environment.bounds.x, this.jumpBaseY);
     if (this.mode === 'hissing' && mode !== 'hissing') this.moveTo(this.hissBaseX, this.environment.bounds.y);
     this.mode = mode;
+    if (mode !== 'idle') {
+      this.pettingTicks = 0;
+      this.pettingDwellTicks = 0;
+      this.pettingTravel = 0;
+      this.cursorAttentionLocked = false;
+      this.cancelTsunderePose();
+    }
     this.frameIndex = 0;
     this.frameClock = 0;
     this.phaseTicks = ticks;
@@ -790,6 +1085,23 @@ export class PetEngine {
   renderIdleOrLook() {
     const center = this.center();
     const pointer = this.environment.cursor;
+    if (this.turnAwayTicks > 0) {
+      const elapsed = TURN_AWAY_TICKS - this.turnAwayTicks;
+      const step = Math.min(8, Math.floor(elapsed / TURN_DIRECTION_FRAME_TICKS));
+      this.renderLookDirectionIndex((this.turnAwayStartDirection + step) % 16);
+      return;
+    }
+    if (this.glanceBackTicks > 0) {
+      const elapsed = GLANCE_BACK_TICKS - this.glanceBackTicks;
+      const step = Math.min(8, Math.floor(elapsed / TURN_DIRECTION_FRAME_TICKS));
+      this.glanceBackTicks -= 1;
+      this.renderLookDirectionIndex((this.turnAwayStartDirection + 8 - step + 16) % 16);
+      return;
+    }
+    if (this.slowApproachScore > 0) {
+      this.renderLookDirection(pointer, false);
+      return;
+    }
     const dx = pointer.x - center.x;
     const dyUp = center.y - pointer.y;
     if (Math.hypot(dx, dyUp) < 85 || this.idleLookClock % 96 < 34) {
@@ -800,6 +1112,95 @@ export class PetEngine {
     if (degrees < 0) degrees += 360;
     const direction = Math.round(degrees / 22.5) % 16;
     this.hooks.render({ kind: 'sheet', row: direction < 8 ? 9 : 10, column: direction < 8 ? direction : direction - 8 });
+  }
+
+  renderLookDirection(pointer, opposite) {
+    const center = this.center();
+    const dx = pointer.x - center.x;
+    const dyUp = center.y - pointer.y;
+    let degrees = Math.atan2(dx, dyUp) * 180 / Math.PI;
+    if (degrees < 0) degrees += 360;
+    let direction = Math.round(degrees / 22.5) % 16;
+    if (opposite) direction = (direction + 8) % 16;
+    this.renderLookDirectionIndex(direction);
+  }
+
+  renderLookDirectionIndex(direction) {
+    direction = (direction % 16 + 16) % 16;
+    this.hooks.render({ kind: 'sheet', row: direction < 8 ? 9 : 10, column: direction < 8 ? direction : direction - 8 });
+  }
+
+  updateTsundereInteraction(pointer, speed, pointerDistance, previousPointerDistance) {
+    const outerRadius = this.environment.bounds.width * 1.8;
+    const innerRadius = this.environment.bounds.width * 0.55;
+    if (this.turnAwayTicks > 0) {
+      if (!this.pointerHeld && pointerDistance < innerRadius && speed < 8) {
+        this.startDodgeFrom(pointer);
+        return;
+      }
+      if (previousPointerDistance !== null && pointerDistance > outerRadius * 1.05 &&
+          previousPointerDistance <= outerRadius * 1.05) {
+        this.turnAwayTicks = 0;
+        this.glanceBackTicks = GLANCE_BACK_TICKS;
+        this.phaseTicks = Math.max(this.phaseTicks, GLANCE_BACK_TICKS);
+        return;
+      }
+      this.turnAwayTicks -= 1;
+      if (this.turnAwayTicks <= 0) {
+        this.glanceBackTicks = GLANCE_BACK_TICKS;
+        this.phaseTicks = Math.max(this.phaseTicks, GLANCE_BACK_TICKS);
+      }
+      return;
+    }
+    if (this.mode !== 'idle' || this.settings.paused || this.pointerHeld ||
+        this.huntAnticipationTicks > 0 || this.pounceActive) {
+      this.slowApproachScore = Math.max(0, this.slowApproachScore - 0.8);
+      return;
+    }
+    const inRange = pointerDistance > innerRadius && pointerDistance < outerRadius;
+    const approaching = previousPointerDistance !== null && previousPointerDistance - pointerDistance > 0.1 &&
+      speed >= 0.25 && speed < 8;
+    const hovering = pointerDistance < outerRadius * 0.78 && speed < 1.25;
+    if (inRange && approaching) this.slowApproachScore += 1;
+    else if (inRange && hovering && this.slowApproachScore >= 3) this.slowApproachScore += 0.45;
+    else this.slowApproachScore = Math.max(0, this.slowApproachScore - 0.6);
+
+    // Keep her attention on a deliberate slow approach instead of allowing
+    // the ordinary idle countdown to start another roaming action midway.
+    if (this.slowApproachScore > 0) this.phaseTicks = Math.max(this.phaseTicks, TURN_AWAY_TICKS);
+
+    const threshold = 15 - 4 * (this.traits.pride / 100) - 2 * (this.traits.temper / 100);
+    if (this.slowApproachScore < threshold) return;
+    this.slowApproachScore = 0;
+    this.turnAwayTicks = TURN_AWAY_TICKS;
+    const center = this.center();
+    let degrees = Math.atan2(pointer.x - center.x, center.y - pointer.y) * 180 / Math.PI;
+    if (degrees < 0) degrees += 360;
+    this.turnAwayStartDirection = Math.round(degrees / 22.5) % 16;
+    this.phaseTicks = Math.max(this.phaseTicks, TURN_AWAY_TICKS);
+    this.speak('多涅。', 'turnAway', 1800);
+  }
+
+  startDodgeFrom(pointer) {
+    const center = this.center();
+    const area = this.environment.workArea;
+    const leftSpace = this.environment.bounds.x - area.x;
+    const rightSpace = area.x + area.width - (this.environment.bounds.x + this.environment.bounds.width);
+    const minimumSpace = this.environment.bounds.width * 0.65;
+    let mode = pointer.x < center.x ? 'walkRight' : 'walkLeft';
+    if (mode === 'walkLeft' && leftSpace < minimumSpace && rightSpace > leftSpace) mode = 'walkRight';
+    if (mode === 'walkRight' && rightSpace < minimumSpace && leftSpace > rightSpace) mode = 'walkLeft';
+    const ticks = Math.round(52 - 20 * (this.traits.closeness / 100));
+    this.cancelHunt();
+    this.cancelTsunderePose();
+    this.setMode(mode, ticks, 0);
+    this.speak('多涅。', 'dodge', 1600);
+  }
+
+  cancelTsunderePose() {
+    this.slowApproachScore = 0;
+    this.turnAwayTicks = 0;
+    this.glanceBackTicks = 0;
   }
 
   cancelHunt() {

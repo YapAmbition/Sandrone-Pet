@@ -8,8 +8,6 @@ export const DEFAULT_TRAITS = Object.freeze({
   closenessGainToday: 0
 });
 
-const EMOJI_COOLDOWN_MS = 30_000;
-
 export function clampTrait(value) {
   return Math.max(0, Math.min(100, Number(value) || 0));
 }
@@ -37,14 +35,6 @@ export function boundedChange(value, delta) {
   return clampTrait(current + amount * (current / 100));
 }
 
-function dayKey(now) {
-  const date = new Date(now);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 export function applyTraitEvent(input, event, now = Date.now()) {
   const traits = normalizeTraits(input);
   const deltas = {
@@ -59,26 +49,30 @@ export function applyTraitEvent(input, event, now = Date.now()) {
     missed: { vitality: -5, boredom: -6, pride: -8, temper: 8 },
     gift: { boredom: -6, pride: 8 },
     giftTapped: { temper: 8, boredom: -2 },
+    petted: { temper: -3, boredom: -7 },
     showOff: { pride: -3 },
     friendly: { boredom: -6 }
   }[event] || {};
   for (const [key, delta] of Object.entries(deltas)) traits[key] = boundedChange(traits[key], delta);
 
-  if (['friendly', 'caught', 'gift'].includes(event)) {
-    const today = dayKey(now);
-    if (traits.closenessDay !== today) {
-      traits.closenessDay = today;
-      traits.closenessGainToday = 0;
-    }
-    const requested = event === 'friendly' ? 0.35 : 0.2;
-    const allowance = Math.max(0, 2 - traits.closenessGainToday);
-    const granted = Math.min(requested, allowance);
-    if (granted > 0) {
-      const before = traits.closeness;
-      traits.closeness = boundedChange(traits.closeness, granted);
-      traits.closenessGainToday += traits.closeness - before;
-    }
+  if (['friendly', 'caught', 'gift', 'petted'].includes(event)) {
+    const requested = event === 'friendly' ? 0.35 : event === 'petted' ? 0.25 : 0.2;
+    traits.closeness = boundedChange(traits.closeness, requested);
   }
+  return traits;
+}
+
+export function applyGiftEffect(input, identifier, now = Date.now()) {
+  const traits = normalizeTraits(input);
+  const deltas = {
+    screw: { vitality: 18, boredom: 4 },
+    feather: { pride: 16, vitality: -6 },
+    gear: { boredom: -18, temper: -4 },
+    ruby: { temper: 10, pride: -6 }
+  }[identifier];
+  if (!deltas) return traits;
+  for (const [key, delta] of Object.entries(deltas)) traits[key] = boundedChange(traits[key], delta);
+  traits.closeness = boundedChange(traits.closeness, 0.25);
   return traits;
 }
 
@@ -109,9 +103,7 @@ export function roamWeights(input, activityLevel = 'default') {
   const b = traits.boredom / 100;
   const p = traits.pride / 100;
   const c = traits.closeness / 100;
-  const livelyIdle = activityLevel === 'lively' ? 0.72 : 1;
   return {
-    idle: 25 * (1.25 - 0.55 * v) * (1.15 - 0.35 * b) * livelyIdle,
     walkRight: 20 * (0.35 + 0.65 * v) * (0.55 + 0.45 * b),
     walkLeft: 20 * (0.35 + 0.65 * v) * (0.55 + 0.45 * b),
     wave: 15 * (0.25 + 0.45 * c + 0.30 * b) * (1 - 0.35 * a),
@@ -147,12 +139,7 @@ function weightedCandidate(candidates, random) {
 
 export function decorateSpeech(base, event, input, options = {}) {
   const traits = normalizeTraits(input);
-  const suppliedNow = Number(options.now);
-  const suppliedLastEmojiAt = Number(options.lastEmojiAt);
-  const now = Number.isFinite(suppliedNow) ? suppliedNow : Date.now();
-  const lastEmojiAt = Number.isFinite(suppliedLastEmojiAt) ? suppliedLastEmojiAt : -Infinity;
   const random = options.random || Math.random;
-  if (now - lastEmojiAt < EMOJI_COOLDOWN_MS) return { text: base, usedEmoji: false, lastEmojiAt };
 
   const a = traits.temper / 100;
   const p = traits.pride / 100;
@@ -169,11 +156,17 @@ export function decorateSpeech(base, event, input, options = {}) {
     candidates.push({ score: Math.max(0.05, c * (0.55 * p + 0.45 * (1 - a))), emoji: '(￣^￣)ノ' });
     candidates.push({ score: Math.max(0.02, c * (1 - a) * 0.16), emoji: '(⁄ ⁄•⁄-⁄•⁄ ⁄)' });
   }
-  if (!candidates.length) return { text: base, usedEmoji: false, lastEmojiAt };
+  if (event === 'turnAway') {
+    candidates.push({ score: Math.max(0.08, 0.65 * p + 0.35 * a), emoji: '(˘^˘)' });
+  }
+  if (event === 'dodge') {
+    candidates.push({ score: Math.max(0.08, 0.70 * a + 0.30 * p), emoji: '(￣ヘ￣)' });
+  }
+  if (!candidates.length) return { text: base, usedEmoji: false };
   const strongest = Math.max(...candidates.map((candidate) => candidate.score));
   const eventBonus = ['hiss', 'missed', 'drag', 'caught'].includes(event) ? 0.10 : 0;
   const probability = Math.min(0.70, 0.05 + strongest * 0.55 + eventBonus);
-  if (random() >= probability) return { text: base, usedEmoji: false, lastEmojiAt };
+  if (random() >= probability) return { text: base, usedEmoji: false };
   const selected = candidates[Number(weightedCandidate(candidates, random))] || candidates[0];
-  return { text: `${base} ${selected.emoji}`, usedEmoji: true, lastEmojiAt: now };
+  return { text: `${base} ${selected.emoji}`, usedEmoji: true };
 }
