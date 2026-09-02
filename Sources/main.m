@@ -1979,7 +1979,8 @@ static void ShowHelpWindow(void) {
     [self noteInteraction];
     [self positionAtBottomRight];
     [self savePosition];
-    [self refreshVisibility];
+    if (_visibilityMode == PetVisibilityModeAlwaysShow) [self setPetVisible:YES force:YES];
+    else [self refreshVisibility];
 }
 
 - (void)setVisibilityMode:(PetVisibilityMode)mode {
@@ -1987,7 +1988,8 @@ static void ShowHelpWindow(void) {
     _visibilityMode = mode;
     [NSUserDefaults.standardUserDefaults setInteger:mode forKey:@"visibilityMode"];
     _fullscreenCheckClock = 0;
-    [self refreshVisibility];
+    if (mode == PetVisibilityModeAlwaysShow) [self setPetVisible:YES force:YES];
+    else [self refreshVisibility];
 }
 
 - (void)setActivityLevel:(PetActivityLevel)level {
@@ -2544,7 +2546,15 @@ static void ShowHelpWindow(void) {
 }
 
 - (void)setPetVisible:(BOOL)visible {
-    if (_petIsVisible == visible) return;
+    [self setPetVisible:visible force:NO];
+}
+
+- (void)setPetVisible:(BOOL)visible force:(BOOL)force {
+    BOOL windowsMatchRequestedState = visible
+        ? (_panel.isVisible && (!_speechTimer.valid || _speechPanel.isVisible) &&
+           (!_giftActive || _giftPanel.isVisible))
+        : (!_panel.isVisible && !_speechPanel.isVisible && !_giftPanel.isVisible);
+    if (!force && _petIsVisible == visible && windowsMatchRequestedState) return;
     _petIsVisible = visible;
     if (visible) {
         [_panel orderFrontRegardless];
